@@ -6,6 +6,7 @@ import {
   getAdjustedPointForFixedRotatedTopLeft,
   getShapeRotationTransform,
 } from "./components/shapeTransforms";
+import { getTextLayoutStyle } from "./shapes/textLayout";
 
 interface EditableTextProps {
   editingTextShape?: Shape;
@@ -139,23 +140,12 @@ export default function EditableText({
         onKeyDown={onKeyDown}
         onPointerDown={(e) => e.stopPropagation()}
         style={{
-          fontSize: `${editingTextShape?.fontSize ?? 16}px`,
-          fontFamily: "Arial",
-          width: "100%",
-          height: "100%",
-          border: "none",
-          padding: "4px",
-          whiteSpace: "pre",
-          lineHeight: "normal",
-          resize: "none",
-          minHeight: 1,
-          minWidth: 1,
-          outline: 0,
-          overflow: "hidden",
+          ...getTextLayoutStyle({
+            fontSize: editingTextShape?.fontSize,
+            color: editingTextShape?.color,
+          }),
           pointerEvents: "all",
           backfaceVisibility: "hidden",
-          display: "inline-block",
-          backgroundColor: "transparent",
         }}
       />
     </foreignObject>

@@ -158,4 +158,69 @@ test.describe("Geometry interactions", () => {
     expect(snapshot?.shapes[0].size[0]).toBeGreaterThan(80);
     expect(snapshot?.shapes[0].size[1]).toBeGreaterThan(26);
   });
+
+  test("rotated multiline text does not shift when editing ends", async ({
+    page,
+  }) => {
+    await openGeometryFixture(page, {
+      id: "rotated-multiline-text",
+      point: [500, 280],
+      size: [180, 70],
+      type: "text",
+      text: "HELLO\nHOW ARE YOU",
+      srcIndex: 0,
+      fontSize: 28,
+      rotation: -35,
+    });
+
+    const textShape = page.locator(
+      '[data-shape-id="rotated-multiline-text"]'
+    );
+    await textShape.dblclick();
+
+    const editingShape = page.locator(
+      '[data-editing-shape-type="text"]'
+    );
+    const textarea = page.locator('[data-editing-textarea="true"]');
+    await expect(editingShape).toBeVisible();
+    await textarea.evaluate((element) => {
+      element.style.caretColor = "transparent";
+      element.setSelectionRange(element.value.length, element.value.length);
+    });
+
+    const editingBox = await editingShape.boundingBox();
+    const editingPixels = await editingShape.screenshot();
+    expect(editingPixels).toMatchSnapshot("rotated-multiline-text.png", {
+      threshold: 0.2,
+      maxDiffPixels: 100,
+    });
+    await textarea.press("Enter");
+    await expect(editingShape).toBeHidden();
+    await expect(textShape).toBeVisible();
+
+    const deselectResult = await page.evaluate(() => {
+      const snapshot = window.__MAGINET_DEBUG__?.exportSnapshot();
+      if (!snapshot) return null;
+      return window.__MAGINET_DEBUG__?.importSnapshot({
+        ...snapshot,
+        selectedShapeIds: [],
+      });
+    });
+    if (!deselectResult?.ok) {
+      throw new Error(deselectResult?.error ?? "Could not clear selection");
+    }
+
+    const displayContent = textShape.locator('[data-text-renderer="true"]');
+    await displayContent.evaluate((element) => {
+      element.style.backgroundColor = "transparent";
+    });
+    const displayBox = await textShape.boundingBox();
+    const displayPixels = await textShape.screenshot();
+
+    expect(displayBox).toEqual(editingBox);
+    expect(displayPixels).toMatchSnapshot("rotated-multiline-text.png", {
+      threshold: 0.2,
+      maxDiffPixels: 100,
+    });
+  });
 });

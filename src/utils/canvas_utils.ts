@@ -50,28 +50,34 @@ export function getTextWidth(text: string, font: string) {
   return metrics.width;
 }
 
-let measureDiv: HTMLPreElement | null = null;
+let measureTextarea: HTMLTextAreaElement | null = null;
 const textMeasurementCache = new Map<string, { width: number; height: number }>();
 const TEXT_MEASUREMENT_CACHE_LIMIT = 500;
 
-function ensureMeasureDiv(): HTMLPreElement | null {
+function ensureMeasureTextarea(): HTMLTextAreaElement | null {
   if (typeof document === "undefined") return null;
 
-  if (measureDiv && measureDiv.isConnected) return measureDiv;
+  if (measureTextarea && measureTextarea.isConnected) return measureTextarea;
 
-  const existing = document.getElementById("__textMeasure");
-  if (existing && existing instanceof HTMLPreElement) {
-    measureDiv = existing;
-    return measureDiv;
+  const existing = document.getElementById("__textMeasureTextarea");
+  if (existing && existing instanceof HTMLTextAreaElement) {
+    measureTextarea = existing;
+    return measureTextarea;
   }
 
-  const mdiv = document.createElement("pre");
-  mdiv.id = "__textMeasure";
+  const textarea = document.createElement("textarea");
+  textarea.id = "__textMeasureTextarea";
+  textarea.wrap = "off";
+  textarea.rows = 1;
+  textarea.cols = 1;
+  textarea.tabIndex = -1;
+  textarea.setAttribute("aria-hidden", "true");
 
-  Object.assign(mdiv.style, {
+  Object.assign(textarea.style, {
+    boxSizing: "border-box",
     whiteSpace: "pre",
-    width: "max-content",
-    height: "max-content",
+    width: "0",
+    height: "0",
     border: "0",
     padding: "4px",
     margin: "0px",
@@ -82,13 +88,19 @@ function ensureMeasureDiv(): HTMLPreElement | null {
     left: "0px",
     lineHeight: "normal",
     fontFamily: "Arial",
-    contain: "layout style paint",
+    fontStyle: "normal",
+    fontWeight: "400",
+    letterSpacing: "normal",
+    textAlign: "start",
+    textIndent: "0",
+    textTransform: "none",
+    overflow: "hidden",
+    resize: "none",
   });
 
-  mdiv.tabIndex = -1;
-  document.body.appendChild(mdiv);
-  measureDiv = mdiv;
-  return measureDiv;
+  document.body.appendChild(textarea);
+  measureTextarea = textarea;
+  return measureTextarea;
 }
 
 export const getBounds = (
@@ -110,8 +122,8 @@ export const getBounds = (
     };
   }
 
-  const mdiv = ensureMeasureDiv();
-  if (!mdiv) {
+  const textarea = ensureMeasureTextarea();
+  if (!textarea) {
     return {
       minX: x,
       maxX: x,
@@ -122,11 +134,11 @@ export const getBounds = (
     };
   }
 
-  mdiv.style.fontSize = `${resolvedFontSize}px`;
-  mdiv.textContent = `${text || " "}\u200d`;
+  textarea.style.fontSize = `${resolvedFontSize}px`;
+  textarea.value = `${text || " "}\u200d`;
 
   const [minX, minY] = [x, y];
-  const [width, height] = [mdiv.offsetWidth, mdiv.offsetHeight];
+  const [width, height] = [textarea.scrollWidth, textarea.scrollHeight];
   if (textMeasurementCache.size >= TEXT_MEASUREMENT_CACHE_LIMIT) {
     const oldestKey = textMeasurementCache.keys().next().value;
     if (oldestKey !== undefined) textMeasurementCache.delete(oldestKey);
