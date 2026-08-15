@@ -187,7 +187,7 @@ export function Shape({
   const handleRotate = (newRotation: number) => {
     setShapes((prevShapes) =>
       prevShapes.map((s) =>
-        s.id === shape.id ? { ...shape, rotation: newRotation } : s
+        s.id === shape.id ? { ...s, rotation: newRotation } : s
       )
     );
   };

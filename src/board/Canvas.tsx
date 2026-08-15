@@ -32,6 +32,7 @@ import EditingTextShape from "./EditingTextShape";
 import { useGamePersistence } from "../hooks/useGamePersistence";
 import { useCanvasGestures } from "../hooks/useCanvasGestures";
 import { useObjectSnapping } from "../hooks/useObjectSnapping";
+import { doesShapeIntersectBounds } from "./components/shapeTransforms";
 import {
   createDebugSnapshot,
   DebugSnapshot,
@@ -47,7 +48,6 @@ import {
   Shape,
   ShapeType,
   Mode,
-  intersect,
 } from "../types/canvas";
 
 import {
@@ -602,13 +602,9 @@ function Canvas() {
       setDragVector(nextDragVector);
       const rect = nextDragVector.toDOMRect();
 
-      const selectedShapes = shapes.filter((shape) => {
-        const [shapeX, shapeY] = shape.point;
-        const [shapeWidth, shapeHeight] = shape.size;
-        // TODO: it's not working properly with text and tokens
-        const shapeRect = new DOMVector(shapeX, shapeY, shapeWidth, shapeHeight).toDOMRect();
-        return intersect(rect, shapeRect);
-      });
+      const selectedShapes = shapes.filter((shape) =>
+        doesShapeIntersectBounds(shape, rect)
+      );
 
       if (selectedShapes.length > 0) {
         setSelectedShapeIds(selectedShapes.map((shape) => shape.id));

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Camera, Shape } from "../types/canvas";
 import { screenToWorld } from "../utils/canvas_utils";
+import { getShapePageBounds } from "../board/components/shapeTransforms";
 
 const OBJECT_SNAP_THRESHOLD_PX = 10;
 
@@ -43,25 +44,6 @@ export function useObjectSnapping({
     });
   };
 
-  const getShapeBounds = (shape: Shape, pointOverride?: [number, number]) => {
-    const [xRaw, yRaw] = pointOverride ?? (shape.point as [number, number]);
-    const [wRaw, hRaw] = shape.size as [number, number];
-    const left = wRaw >= 0 ? xRaw : xRaw + wRaw;
-    const top = hRaw >= 0 ? yRaw : yRaw + hRaw;
-    const width = Math.abs(wRaw);
-    const height = Math.abs(hRaw);
-    const right = left + width;
-    const bottom = top + height;
-    return {
-      left,
-      right,
-      top,
-      bottom,
-      centerX: left + width / 2,
-      centerY: top + height / 2,
-    };
-  };
-
   const snapPointToGrid = (
     point: [number, number],
     context?: SnapContext
@@ -83,7 +65,7 @@ export function useObjectSnapping({
           let bottom = Number.NEGATIVE_INFINITY;
 
           for (const movingShape of context.movingShapes) {
-            const bounds = getShapeBounds(movingShape, [
+            const bounds = getShapePageBounds(movingShape, [
               movingShape.point[0] + dx,
               movingShape.point[1] + dy,
             ]);
@@ -102,7 +84,7 @@ export function useObjectSnapping({
             centerY: (top + bottom) / 2,
           };
         })()
-        : getShapeBounds(context.movingShape, point);
+        : getShapePageBounds(context.movingShape, point);
     const movingAnchorsX = [movingBounds.left, movingBounds.centerX, movingBounds.right];
     const movingAnchorsY = [movingBounds.top, movingBounds.centerY, movingBounds.bottom];
     const snapThreshold = OBJECT_SNAP_THRESHOLD_PX / Math.max(camera.z, 0.001);
@@ -141,7 +123,7 @@ export function useObjectSnapping({
 
     for (const candidate of shapes) {
       if (excludedIds.has(candidate.id)) continue;
-      const bounds = getShapeBounds(candidate);
+      const bounds = getShapePageBounds(candidate);
       const candidateAnchorsX = [bounds.left, bounds.centerX, bounds.right];
       const candidateAnchorsY = [bounds.top, bounds.centerY, bounds.bottom];
       for (const source of movingAnchorsX) {

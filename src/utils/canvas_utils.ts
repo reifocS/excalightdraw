@@ -51,6 +51,9 @@ export function getTextWidth(text: string, font: string) {
 }
 
 let measureDiv: HTMLPreElement | null = null;
+const textMeasurementCache = new Map<string, { width: number; height: number }>();
+const TEXT_MEASUREMENT_CACHE_LIMIT = 500;
+
 function ensureMeasureDiv(): HTMLPreElement | null {
   if (typeof document === "undefined") return null;
 
@@ -67,15 +70,19 @@ function ensureMeasureDiv(): HTMLPreElement | null {
 
   Object.assign(mdiv.style, {
     whiteSpace: "pre",
-    width: "auto",
-    border: "1px solid red",
+    width: "max-content",
+    height: "max-content",
+    border: "0",
     padding: "4px",
     margin: "0px",
-    opacity: "0",
+    visibility: "hidden",
+    pointerEvents: "none",
     position: "absolute",
     top: "-500px",
     left: "0px",
-    zIndex: "9999",
+    lineHeight: "normal",
+    fontFamily: "Arial",
+    contain: "layout style paint",
   });
 
   mdiv.tabIndex = -1;
@@ -90,6 +97,19 @@ export const getBounds = (
   y: number,
   fontSize?: number
 ) => {
+  const resolvedFontSize = fontSize ?? 16;
+  const cacheKey = `${resolvedFontSize}\u0000${text}`;
+  const cachedMeasurement = textMeasurementCache.get(cacheKey);
+  if (cachedMeasurement) {
+    return {
+      minX: x,
+      maxX: x + cachedMeasurement.width,
+      minY: y,
+      maxY: y + cachedMeasurement.height,
+      ...cachedMeasurement,
+    };
+  }
+
   const mdiv = ensureMeasureDiv();
   if (!mdiv) {
     return {
@@ -102,12 +122,16 @@ export const getBounds = (
     };
   }
 
-  mdiv.innerHTML = text || " ";
-  mdiv.style.font = `${fontSize || 16}px Arial`;
-  mdiv.innerHTML = text + "&zwj;";
+  mdiv.style.fontSize = `${resolvedFontSize}px`;
+  mdiv.textContent = `${text || " "}\u200d`;
 
   const [minX, minY] = [x, y];
   const [width, height] = [mdiv.offsetWidth, mdiv.offsetHeight];
+  if (textMeasurementCache.size >= TEXT_MEASUREMENT_CACHE_LIMIT) {
+    const oldestKey = textMeasurementCache.keys().next().value;
+    if (oldestKey !== undefined) textMeasurementCache.delete(oldestKey);
+  }
+  textMeasurementCache.set(cacheKey, { width, height });
   return {
     minX,
     maxX: minX + width,

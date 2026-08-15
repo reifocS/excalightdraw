@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   getDraggedRotation,
   getPointerAngleFromCenter,
+  getResizeCursor,
+  getResizedShape,
   getRotationHandleOffset,
   normalizeAngleDelta,
 } from "./selectionBoxMath";
@@ -44,5 +46,78 @@ describe("selectionBoxMath", () => {
   it("keeps zoomed-in tiny shapes reachable on screen", () => {
     expect(getRotationHandleOffset(11, 12, 10)).toBe(3);
     expect(getRotationHandleOffset(20, 20, 10)).toBe(3);
+  });
+
+  it("keeps the opposite corner fixed while resizing a rotated shape", () => {
+    const result = getResizedShape({
+      handle: "se",
+      startPointer: [161.2132034356, 95.3553390593],
+      currentPointer: [196.5685424949, 130.7106781187],
+      originalPoint: [100, 50],
+      originalDimensions: { width: 80, height: 20 },
+      rotation: 45,
+    });
+
+    expect(result.size[0]).toBeCloseTo(130);
+    expect(result.size[1]).toBeCloseTo(20);
+    expect(result.point[0]).toBeCloseTo(92.6776695297);
+    expect(result.point[1]).toBeCloseTo(67.6776695297);
+  });
+
+  it("continues expanding after a resize handle crosses its opposite edge", () => {
+    const result = getResizedShape({
+      handle: "e",
+      startPointer: [200, 70],
+      currentPointer: [40, 70],
+      originalPoint: [100, 50],
+      originalDimensions: { width: 100, height: 40 },
+      rotation: 0,
+    });
+
+    expect(result.size[0]).toBeCloseTo(60);
+    expect(result.size[1]).toBe(40);
+    expect(result.point).toEqual([40, 50]);
+  });
+
+  it("keeps a rotated scale origin fixed after crossing it", () => {
+    const result = getResizedShape({
+      handle: "e",
+      startPointer: [185.3553390593, 105.3553390593],
+      currentPointer: [72.2182540695, -7.7817459305],
+      originalPoint: [100, 50],
+      originalDimensions: { width: 100, height: 40 },
+      rotation: 45,
+    });
+
+    expect(result.size[0]).toBeCloseTo(60);
+    expect(result.size[1]).toBe(40);
+    expect(result.point[0]).toBeCloseTo(63.4314575051);
+    expect(result.point[1]).toBeCloseTo(-6.5685424949);
+  });
+
+  it("keeps measured text dimensions anchored during uniform resize", () => {
+    const result = getResizedShape({
+      handle: "w",
+      startPointer: [100, 60],
+      currentPointer: [50, 60],
+      originalPoint: [100, 50],
+      originalDimensions: { width: 100, height: 20 },
+      rotation: 0,
+      getUniformDimensions: (scale) => ({
+        width: 92 * scale + 8,
+        height: 16 * scale + 4,
+      }),
+    });
+
+    expect(result.scale).toBe(1.5);
+    expect(result.size).toEqual([146, 28]);
+    expect(result.point).toEqual([54, 46]);
+  });
+
+  it("rotates resize cursors with the shape", () => {
+    expect(getResizeCursor("n", 0)).toBe("ns-resize");
+    expect(getResizeCursor("n", 90)).toBe("ew-resize");
+    expect(getResizeCursor("nw", 45)).toBe("ns-resize");
+    expect(getResizeCursor("e", -45)).toBe("nesw-resize");
   });
 });
