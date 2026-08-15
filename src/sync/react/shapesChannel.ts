@@ -2,6 +2,13 @@ import type { SyncChannelPlugin } from "@vescofire/peersync";
 import type { Shape } from "../../types/canvas";
 import { useShapeStore } from "../../hooks/useShapeStore";
 import { setPeerShapes } from "./peerSyncState";
+import {
+  isValidPeerId,
+  isValidShapeId,
+  MAX_CONNECTED_PEERS,
+  MAX_SHAPES_PER_PEER,
+  normalizeRemoteShapeList,
+} from "./syncValidation";
 
 export const SHAPES_SYNC_CHANNEL_KEY = "shapes:v1";
 
@@ -28,27 +35,68 @@ export type ShapesSyncChannelOptions = {
   setRemoteShapes?: (peerId: string, shapes: Shape[]) => void;
 };
 
-const isValidShape = (shape: unknown): shape is Shape => {
-  if (!shape || typeof shape !== "object") return false;
-  const candidate = shape as Record<string, unknown>;
-  return typeof candidate.id === "string";
-};
-
-const normalizeShapes = (value: unknown): Shape[] => {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isValidShape);
-};
-
 const normalizeShapesByPeer = (value: unknown): ShapesByPeer => {
-  if (!value || typeof value !== "object") return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > MAX_CONNECTED_PEERS + 1) return {};
 
   const normalized: ShapesByPeer = {};
-  Object.entries(value as Record<string, unknown>).forEach(([peerId, shapes]) => {
-    if (!peerId) return;
-    normalized[peerId] = normalizeShapes(shapes);
-  });
+  for (const [peerId, shapes] of entries) {
+    if (!isValidPeerId(peerId)) return {};
+    const normalizedShapes = normalizeRemoteShapeList(shapes);
+    if (!normalizedShapes) return {};
+    normalized[peerId] = normalizedShapes;
+  }
 
   return normalized;
+};
+
+const normalizeIdList = (value: unknown): string[] | null => {
+  if (!Array.isArray(value) || value.length > MAX_SHAPES_PER_PEER) return null;
+  if (!value.every(isValidShapeId)) return null;
+  return Array.from(new Set(value));
+};
+
+const normalizeShapeListPatch = (value: unknown): ShapeListPatch | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const upserts = normalizeRemoteShapeList(record.upserts);
+  const removedIds = normalizeIdList(record.removedIds);
+  const order = record.order === null ? null : normalizeIdList(record.order);
+  if (!upserts || !removedIds || order === null && record.order !== null) {
+    return null;
+  }
+  return { upserts, removedIds, order };
+};
+
+const normalizeShapesPatch = (value: unknown): ShapesPatch | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    !Array.isArray(record.peerPatches) ||
+    record.peerPatches.length > MAX_CONNECTED_PEERS + 1 ||
+    !Array.isArray(record.removedPeerIds) ||
+    record.removedPeerIds.length > MAX_CONNECTED_PEERS + 1 ||
+    !record.removedPeerIds.every(isValidPeerId)
+  ) {
+    return null;
+  }
+
+  const peerPatches: ShapesPatch["peerPatches"] = [];
+  for (const value of record.peerPatches) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const peerPatch = value as Record<string, unknown>;
+    if (!isValidPeerId(peerPatch.peerId)) return null;
+    const patch = normalizeShapeListPatch(peerPatch.patch);
+    if (!patch) return null;
+    peerPatches.push({ peerId: peerPatch.peerId, patch });
+  }
+
+  return {
+    peerPatches,
+    removedPeerIds: Array.from(new Set(record.removedPeerIds)),
+  };
 };
 
 const areIdsEqual = (left: string[], right: string[]) => {
@@ -145,16 +193,19 @@ const diffShapesByPeer = (prev: ShapesByPeer, next: ShapesByPeer): ShapesPatch |
 };
 
 const applyShapesPatch = (base: ShapesByPeer, patch: ShapesPatch): ShapesByPeer => {
+  const normalizedPatch = normalizeShapesPatch(patch);
+  if (!normalizedPatch) return base;
+
   let changed = false;
   const next: ShapesByPeer = { ...base };
 
-  patch.removedPeerIds.forEach((peerId) => {
+  normalizedPatch.removedPeerIds.forEach((peerId) => {
     if (!(peerId in next)) return;
     delete next[peerId];
     changed = true;
   });
 
-  patch.peerPatches.forEach(({ peerId, patch: peerPatch }) => {
+  normalizedPatch.peerPatches.forEach(({ peerId, patch: peerPatch }) => {
     const currentShapes = next[peerId] ?? [];
     const nextShapes = applyShapeListPatch(currentShapes, peerPatch);
     if (nextShapes === currentShapes) return;
@@ -273,4 +324,5 @@ export const shapesPatchUtils = {
   diffShapesByPeer,
   applyShapesPatch,
   normalizeShapesByPeer,
+  normalizeShapesPatch,
 };
