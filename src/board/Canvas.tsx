@@ -33,6 +33,7 @@ import { useGamePersistence } from "../hooks/useGamePersistence";
 import { useCanvasGestures } from "../hooks/useCanvasGestures";
 import { useObjectSnapping } from "../hooks/useObjectSnapping";
 import { doesShapeIntersectBounds } from "./components/shapeTransforms";
+import { MultiSelectionBox } from "./components/MultiSelectionBox";
 import {
   createDebugSnapshot,
   DebugSnapshot,
@@ -878,6 +879,11 @@ function Canvas() {
   const transform = `scale(${camera.z}) translate(${camera.x}px, ${camera.y}px)`;
   const editingTextShape = shapes.find((shape) => shape.id === editingText?.id);
   const shapesFiltered = shapes.filter((shape) => shape.id !== editingText?.id);
+  const selectedShapes = useMemo(() => {
+    if (selectedShapeIds.length < 2) return [];
+    const selectedIds = new Set(selectedShapeIds);
+    return shapes.filter((shape) => selectedIds.has(shape.id));
+  }, [selectedShapeIds, shapes]);
 
   const viewportWorldBounds = useMemo(() => {
     if (viewportSize.width === 0 || viewportSize.height === 0) {
@@ -1044,6 +1050,14 @@ function Canvas() {
                 editingText={editingText}
                 setEditingText={setEditingText}
                 setShapes={setShapes}
+              />
+            )}
+
+            {!editingText && mode === "select" && selectedShapes.length > 1 && (
+              <MultiSelectionBox
+                shapes={selectedShapes}
+                zoom={camera.z}
+                cameraRef={cameraRef}
               />
             )}
 

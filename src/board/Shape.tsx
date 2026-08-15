@@ -205,7 +205,7 @@ export function Shape({
         stackIndex={stackIndex}
         onToggleTap={onToggleTap}
       />
-      {selected && !readOnly && (
+      {selected && selectedShapeIds.length === 1 && !readOnly && (
         <SelectionBox
           shape={shape}
           zoom={zoom}
