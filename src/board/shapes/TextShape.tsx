@@ -1,6 +1,8 @@
 import React from "react";
 import { Shape as ShapeType } from "../../types/canvas";
 import { getBounds } from "../../utils/canvas_utils";
+import { Textarea } from "../../components/ui/Input";
+import { getTextLayoutStyle } from "./textLayout";
 
 // TODO Refactor use foreignObject to render text to keep return to lines
 const TextShape = ({
@@ -16,6 +18,7 @@ const TextShape = ({
 }) => {
   const { point, text, color, fontSize } = shape;
   const bounds = getBounds(text ?? "", point[0], point[1], fontSize);
+  const htmlProps = commonProps as unknown as React.HTMLProps<HTMLTextAreaElement>;
   return (
     <foreignObject
       data-shape-id={shape.id}
@@ -26,30 +29,25 @@ const TextShape = ({
       height={bounds.height}
       transform={transform}
     >
-      <div
-        {...(commonProps as unknown as React.HTMLProps<HTMLDivElement>)}
+      <Textarea
+        {...htmlProps}
+        variant="unstyled"
+        data-text-renderer="true"
+        readOnly
+        tabIndex={-1}
+        value={text ?? ""}
         style={{
-          width: "100%",
-          height: "100%",
-          border: "none",
-          padding: "4px",
-          whiteSpace: "pre",
-          lineHeight: "normal",
-          minHeight: 1,
-          minWidth: 1,
-          outline: 0,
-          overflow: "hidden",
+          ...getTextLayoutStyle({
+            fontSize,
+            color,
+            backgroundColor: selected
+              ? "rgba(0, 0, 0, 0.1)"
+              : "transparent",
+          }),
+          ...htmlProps.style,
           userSelect: "none",
-          display: "inline-block",
-          position: "relative",
-          color,
-          fontSize: `${fontSize}px`,
-          fontFamily: "Arial",
-          backgroundColor: selected ? "rgba(0, 0, 0, 0.1)" : "transparent",
         }}
-      >
-        {text}
-      </div>
+      />
     </foreignObject>
   );
 };
