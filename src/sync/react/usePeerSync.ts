@@ -106,6 +106,7 @@ export function usePeerSync(options: UsePeerSyncOptions) {
           peerId: peer.id,
           playerName: localPlayerName,
           timestamp: entry.timestamp,
+          cardsInHand: cards.length,
         },
       });
     }

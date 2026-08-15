@@ -8,6 +8,14 @@ import {
 } from "@vescofire/peersync";
 import { createPeerJsTransport } from "@vescofire/peersync/peerjs";
 import { createShapesSyncChannel } from "./shapesChannel";
+import {
+  createConnectionLifecycle,
+  type PeerConnectionPhase,
+} from "./connectionLifecycle";
+import {
+  isValidPeerId,
+  normalizeDiscoveredPeerIds,
+} from "./syncValidation";
 
 export type Message<TPayload = unknown> = SyncEnvelope<string, TPayload>;
 
@@ -19,6 +27,7 @@ export type MessageCallback<TPayload = unknown> = (
 export interface PeerState {
   peer: Peer | null;
   connections: Map<string, DataConnection>;
+  connectionStates: Map<string, PeerConnectionPhase>;
   error: Error | null;
   initPeer: () => () => void;
   connectToPeer: (peerId: string) => void;
@@ -45,11 +54,15 @@ const setPeerError = (nextError: Error) => {
   });
 };
 
+let connectionLifecycle: ReturnType<typeof createConnectionLifecycle> | null =
+  null;
+
 const syncTransport = createPeerJsTransport({
   onPeerReady: (peer) => {
     usePeerStore.setState({ peer, error: null });
   },
   onPeerDestroyed: () => {
+    connectionLifecycle?.stop();
     usePeerStore.setState({ peer: null, connections: new Map() });
   },
   onConnectionsChanged: (connections) => {
@@ -69,11 +82,44 @@ let coreHandlersRegistered = false;
 let channelPluginsRegistered = false;
 const runtimeLeases = new Set<symbol>();
 
+const setConnectionPhase = (
+  peerId: string,
+  phase: PeerConnectionPhase | null
+) => {
+  usePeerStore.setState((state) => {
+    const currentPhase = state.connectionStates.get(peerId);
+    if (phase === null && currentPhase === undefined) return state;
+    if (phase !== null && currentPhase === phase) return state;
+
+    const connectionStates = new Map(state.connectionStates);
+    if (phase === null) {
+      connectionStates.delete(peerId);
+    } else {
+      connectionStates.set(peerId, phase);
+    }
+    return { connectionStates };
+  });
+};
+
+connectionLifecycle = createConnectionLifecycle({
+  connect: (peerId) => syncClient.connect(peerId),
+  isConnected: (peerId) => usePeerStore.getState().connections.has(peerId),
+  isActive: () => runtimeLeases.size > 0,
+  onPhaseChange: setConnectionPhase,
+  onError: (error) => setPeerError(toError(error)),
+  retryDelayOffsetMs: (peerId) => {
+    const localPeerId = usePeerStore.getState().peer?.id;
+    if (!localPeerId) return 0;
+    return localPeerId.localeCompare(peerId) > 0 ? 1_000 : 0;
+  },
+});
+
 const ensureCoreHandlers = () => {
   if (coreHandlersRegistered) return;
   coreHandlersRegistered = true;
 
   syncClient.onConnectionOpen((connectedPeerId) => {
+    connectionLifecycle?.handleOpen(connectedPeerId);
     const { connections, peer } = usePeerStore.getState();
     const connectedPeers = Array.from(connections.keys()).filter(
       (peerId) => peerId !== connectedPeerId
@@ -98,11 +144,20 @@ const ensureCoreHandlers = () => {
     );
   });
 
+  syncClient.onConnectionClose((connectedPeerId) => {
+    connectionLifecycle?.handleClose(connectedPeerId);
+  });
+
   syncClient.onMessage("peer-sync", (message) => {
     if (!isPeerSyncEnvelope(message)) return;
 
+    const discoveredPeerIds = normalizeDiscoveredPeerIds(
+      message.payload.connectedPeers
+    );
+    if (!discoveredPeerIds) return;
+
     const { connections, peer } = usePeerStore.getState();
-    message.payload.connectedPeers.forEach((peerId) => {
+    discoveredPeerIds.forEach((peerId) => {
       if (!connections.has(peerId) && peer?.id !== peerId) {
         usePeerStore.getState().connectToPeer(peerId);
       }
@@ -129,6 +184,7 @@ const startPeerRuntime = () => {
 };
 
 const stopPeerRuntime = () => {
+  connectionLifecycle?.stop();
   void syncClient.stop().catch((error) => {
     setPeerError(toError(error));
   });
@@ -153,6 +209,7 @@ const acquirePeerRuntimeLease = () => {
 export const usePeerStore = create<PeerState>((_, get) => ({
   peer: null,
   connections: new Map(),
+  connectionStates: new Map(),
   error: null,
 
   initPeer: () => {
@@ -161,15 +218,11 @@ export const usePeerStore = create<PeerState>((_, get) => ({
 
   connectToPeer: (peerId: string) => {
     const targetPeerId = peerId.trim();
-    if (!targetPeerId) return;
+    if (!isValidPeerId(targetPeerId)) return;
 
-    const { peer, connections } = get();
+    const { peer } = get();
     if (peer?.id === targetPeerId) return;
-    if (connections.has(targetPeerId)) return;
-
-    void syncClient.connect(targetPeerId).catch((error) => {
-      setPeerError(toError(error));
-    });
+    connectionLifecycle?.request(targetPeerId);
   },
 
   sendMessage: (message: Message, peerId?: string) => {
@@ -178,6 +231,7 @@ export const usePeerStore = create<PeerState>((_, get) => ({
 
   disconnect: (peerId?: string) => {
     if (peerId) {
+      connectionLifecycle?.cancel(peerId);
       void syncClient.disconnect(peerId).catch((error) => {
         setPeerError(toError(error));
       });

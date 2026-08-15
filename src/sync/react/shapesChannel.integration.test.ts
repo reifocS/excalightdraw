@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createSyncClient, type SyncClientOptions, type SyncPeerId } from "@vescofire/peersync";
 import { MemorySyncNetwork } from "@vescofire/peersync/testing";
-import { createShapesSyncChannel } from "./shapesChannel";
+import { createShapesSyncChannel, shapesPatchUtils } from "./shapesChannel";
 import type { Shape } from "../../types/canvas";
 
 const wait = (durationMs: number) =>
@@ -150,5 +150,27 @@ describe("shapes channel integration", () => {
       const syncedCardB = remoteShapes.find((shape) => shape.id === "card-b");
       expect(syncedCardB?.point).toEqual([380, 180]);
     });
+  });
+
+  it("ignores malformed remote patches without corrupting known shapes", () => {
+    const card = createShape("card-a", [100, 120]);
+    const base = { "peer-a": [card] };
+
+    const result = shapesPatchUtils.applyShapesPatch(base, {
+      peerPatches: [
+        {
+          peerId: "peer-a",
+          patch: {
+            upserts: [{ id: "malformed" }],
+            removedIds: ["card-a"],
+            order: ["malformed"],
+          },
+        },
+      ],
+      removedPeerIds: [],
+    } as never);
+
+    expect(result).toBe(base);
+    expect(result["peer-a"]).toEqual([card]);
   });
 });

@@ -1,38 +1,23 @@
 import toast from "react-hot-toast";
-import type { Shape, RandomEventType } from "../../types/canvas";
+import type { Shape } from "../../types/canvas";
 import type { ActionLogEntry } from "../../board/ActionLog";
 import { MAX_ACTION_LOG_ENTRIES } from "../../board/constants/game";
 import { describeRandomEvent, logActionToConsole } from "../../utils/game";
 import { usePeerStore } from "./peerStore";
-
-type ConnectedMessagePayload = {
-  peerId: string;
-  name?: string;
-};
-
-type HeartbeatMessagePayload = {
-  peerId: string;
-  timestamp: number;
-  name?: string;
-};
-
-type RandomEventMessagePayload = {
-  type: RandomEventType;
-  result: string;
-  playerName?: string;
-  peerId?: string;
-  timestamp?: number;
-};
-
-type ActionLogSnapshotPayload = {
-  entries: ActionLogEntry[];
-};
+import {
+  normalizeActionLogEntry,
+  normalizeActionLogSnapshot,
+  normalizeConnectedPayload,
+  normalizeHeartbeatPayload,
+  normalizeRandomEventPayload,
+  type SyncedActionLogEntry,
+} from "./syncValidation";
 
 export type PeerSyncUiState = {
   receivedDataMap: Record<string, Shape[]>;
   peerPresence: Record<string, number>;
   peerNames: Record<string, string>;
-  actionLog: ActionLogEntry[];
+  actionLog: SyncedActionLogEntry[];
 };
 
 const INITIAL_PEER_SYNC_UI_STATE: PeerSyncUiState = {
@@ -104,27 +89,57 @@ export const setPeerName = (peerId: string, name: string) => {
   });
 };
 
-export const addActionLogEntry = (entry: ActionLogEntry) => {
-  logActionToConsole(entry);
-  setPeerSyncUiState((prev) => {
-    const actionLog = [...prev.actionLog, entry].slice(-MAX_ACTION_LOG_ENTRIES);
-    return {
-      ...prev,
-      actionLog,
-    };
+export const mergeActionLogEntries = (
+  current: SyncedActionLogEntry[],
+  incoming: SyncedActionLogEntry[]
+) => {
+  const byId = new Map<string, SyncedActionLogEntry>();
+  current.forEach((entry) => byId.set(entry.eventId, entry));
+  let changed = false;
+  incoming.forEach((entry) => {
+    if (byId.has(entry.eventId)) return;
+    byId.set(entry.eventId, entry);
+    changed = true;
   });
+  if (!changed) return current;
+  return Array.from(byId.values())
+    .sort(
+      (left, right) =>
+        left.timestamp - right.timestamp ||
+        left.eventId.localeCompare(right.eventId)
+    )
+    .slice(-MAX_ACTION_LOG_ENTRIES);
 };
 
-const mergeActionLogSnapshot = (entries: ActionLogEntry[]) => {
-  if (entries.length === 0) return;
+const addNormalizedActionLogEntries = (entries: SyncedActionLogEntry[]) => {
+  if (entries.length === 0) return [];
+  const knownIds = new Set(
+    getPeerSyncUiStateSnapshot().actionLog.map((entry) => entry.eventId)
+  );
+  const additions = entries.filter((entry) => {
+    if (knownIds.has(entry.eventId)) return false;
+    knownIds.add(entry.eventId);
+    return true;
+  });
+  if (additions.length === 0) return [];
   setPeerSyncUiState((prev) => {
-    const actionLog = [...prev.actionLog, ...entries].slice(-MAX_ACTION_LOG_ENTRIES);
+    const actionLog = mergeActionLogEntries(prev.actionLog, additions);
+    if (actionLog === prev.actionLog) return prev;
     return {
       ...prev,
       actionLog,
     };
   });
-  entries.forEach((entry) => logActionToConsole(entry, "Action Snapshot"));
+  return additions;
+};
+
+export const addActionLogEntry = (entry: ActionLogEntry) => {
+  const normalized = normalizeActionLogEntry(entry);
+  if (!normalized) return null;
+  const [added] = addNormalizedActionLogEntries([normalized]);
+  if (!added) return null;
+  logActionToConsole(added);
+  return added;
 };
 
 let messageSubscriptionsRegistered = false;
@@ -135,65 +150,69 @@ export const ensurePeerSyncMessageSubscriptions = () => {
 
   const onMessage = usePeerStore.getState().onMessage;
 
-  onMessage<ConnectedMessagePayload>("connected", (message) => {
-    toast(`Peer connected: ${message.payload.peerId}`, {
-      id: `peer-connected:${message.payload.peerId}`,
+  onMessage("connected", (message, fromPeerId) => {
+    const connected = normalizeConnectedPayload(message.payload, fromPeerId);
+    if (!connected) return;
+
+    toast(`Peer connected: ${connected.peerId}`, {
+      id: `peer-connected:${connected.peerId}`,
     });
 
-    setPeerPresenceTimestamp(message.payload.peerId, Date.now());
+    setPeerPresenceTimestamp(connected.peerId, Date.now());
 
-    if (message.payload.name) {
-      setPeerName(message.payload.peerId, message.payload.name);
+    if (connected.name) {
+      setPeerName(connected.peerId, connected.name);
     }
 
     const { peer, sendMessage } = usePeerStore.getState();
-    const actionLogEntries = getPeerSyncUiStateSnapshot().actionLog;
-    if (peer?.id && message.payload.peerId && actionLogEntries.length > 0) {
+    const ownActionLogEntries = getPeerSyncUiStateSnapshot()
+      .actionLog.filter((entry) => entry.playerId === peer?.id)
+      .slice(-20);
+    if (peer?.id && ownActionLogEntries.length > 0) {
       sendMessage(
         {
           type: "action-log-snapshot",
-          payload: { entries: actionLogEntries.slice(-20) },
+          payload: { entries: ownActionLogEntries },
         },
-        message.payload.peerId
+        connected.peerId
       );
     }
   });
 
-  onMessage("prouton", () => {
-    toast("Prouton!");
-  });
-
-  onMessage<HeartbeatMessagePayload>("heartbeat", (message) => {
-    setPeerPresenceTimestamp(message.payload.peerId, message.payload.timestamp);
-    if (message.payload.name) {
-      setPeerName(message.payload.peerId, message.payload.name);
+  onMessage("heartbeat", (message, fromPeerId) => {
+    const heartbeat = normalizeHeartbeatPayload(message.payload, fromPeerId);
+    if (!heartbeat) return;
+    setPeerPresenceTimestamp(heartbeat.peerId, heartbeat.timestamp);
+    if (heartbeat.name) {
+      setPeerName(heartbeat.peerId, heartbeat.name);
     }
   });
 
-  onMessage<ActionLogEntry>("action-log", (message) => {
-    const incoming = message.payload;
+  onMessage("action-log", (message, fromPeerId) => {
+    const incoming = normalizeActionLogEntry(message.payload, { fromPeerId });
+    if (!incoming) return;
+    const [added] = addNormalizedActionLogEntries([incoming]);
+    if (added) logActionToConsole(added);
+  });
+
+  onMessage("random-event", (message, fromPeerId) => {
+    const event = normalizeRandomEventPayload(message.payload, fromPeerId);
+    if (!event) return;
+
     addActionLogEntry({
-      ...incoming,
-      timestamp: incoming.timestamp ?? Date.now(),
+      playerId: event.peerId,
+      playerName: event.playerName,
+      action: describeRandomEvent(event),
+      cardsInHand: event.cardsInHand,
+      timestamp: event.timestamp,
     });
   });
 
-  onMessage<RandomEventMessagePayload>("random-event", (message) => {
-    const { type, result, playerName, peerId, timestamp } = message.payload;
-
-    addActionLogEntry({
-      playerId: peerId ?? "Peer",
-      playerName,
-      action: describeRandomEvent({ type, result }),
-      cardsInHand: 0,
-      timestamp: timestamp ?? Date.now(),
-    });
-  });
-
-  onMessage<ActionLogSnapshotPayload>("action-log-snapshot", (message) => {
-    const { entries } = message.payload;
-    if (!Array.isArray(entries)) return;
-    mergeActionLogSnapshot(entries);
+  onMessage("action-log-snapshot", (message, fromPeerId) => {
+    const entries = normalizeActionLogSnapshot(message.payload, fromPeerId);
+    if (!entries) return;
+    const additions = addNormalizedActionLogEntries(entries);
+    additions.forEach((entry) => logActionToConsole(entry, "Action Snapshot"));
   });
 
 };
