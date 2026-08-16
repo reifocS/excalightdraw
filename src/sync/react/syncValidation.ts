@@ -45,15 +45,21 @@ const isBoundedString = (
   value.length <= maximumLength &&
   (allowEmpty || value.length > 0);
 
-const isSafeImageSource = (value: unknown): value is string =>
+export const isSafeImageSource = (value: unknown): value is string =>
   isBoundedString(value, MAX_URL_LENGTH) &&
   /^(https?:\/\/|data:image\/(?:gif|jpe?g|png|webp);base64,)/i.test(value);
 
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export const isSafeObjectKey = (value: string) => !UNSAFE_OBJECT_KEYS.has(value);
+
 export const isValidPeerId = (value: unknown): value is string =>
-  isBoundedString(value, MAX_ID_LENGTH) && value.trim() === value;
+  isBoundedString(value, MAX_ID_LENGTH) &&
+  value.trim() === value &&
+  isSafeObjectKey(value);
 
 export const isValidShapeId = (value: unknown): value is string =>
-  isBoundedString(value, MAX_ID_LENGTH);
+  isBoundedString(value, MAX_ID_LENGTH) && isSafeObjectKey(value);
 
 const normalizeTuple = (value: unknown): [number, number] | null => {
   if (!Array.isArray(value) || value.length !== 2) return null;

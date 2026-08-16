@@ -1,5 +1,11 @@
 import { CardState } from "../hooks/useCardReducer";
 import { Camera, Card, Counter, Mode, Shape, ShapeType } from "../types/canvas";
+import {
+  isSafeImageSource,
+  isSafeObjectKey,
+  MAX_CONNECTED_PEERS,
+  MAX_SHAPES_PER_PEER,
+} from "../sync/react/syncValidation";
 
 export const DEBUG_SNAPSHOT_KIND = "maginet/debug-snapshot";
 export const DEBUG_SNAPSHOT_VERSION = 1;
@@ -58,8 +64,34 @@ declare global {
   }
 }
 
+const MAX_ID_LENGTH = 256;
+const MAX_TEXT_LENGTH = 20_000;
+const MAX_LABEL_LENGTH = 80;
+const MAX_COLOR_LENGTH = 128;
+const MAX_COUNTERS = 64;
+const MAX_CARD_FACES = 4;
+const MAX_CARDS_PER_ZONE = 1_000;
+
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
+
+const isBoundedString = (
+  value: unknown,
+  maximumLength: number,
+  allowEmpty = false
+): value is string =>
+  typeof value === "string" &&
+  value.length <= maximumLength &&
+  (allowEmpty || value.length > 0);
+
+const isValidId = (value: unknown): value is string =>
+  isBoundedString(value, MAX_ID_LENGTH) && isSafeObjectKey(value);
+
+const sanitizeImageSources = (value: unknown): string[] | null => {
+  if (!Array.isArray(value) || value.length > MAX_CARD_FACES) return null;
+  if (!value.every(isSafeImageSource)) return null;
+  return [...value];
+};
 
 const cloneCounter = (counter: Counter): Counter => ({ ...counter });
 
@@ -104,16 +136,16 @@ const sanitizePointTuple = (value: unknown): [number, number] | null => {
 const sanitizeCard = (value: unknown): Card | null => {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  if (typeof record.id !== "string" || !Array.isArray(record.src)) return null;
-  const src = record.src.filter((entry): entry is string => typeof entry === "string");
-  if (src.length !== record.src.length) return null;
+  if (!isValidId(record.id)) return null;
+  const src = sanitizeImageSources(record.src);
+  if (!src) return null;
   return { id: record.id, src };
 };
 
 const sanitizeCounter = (value: unknown): Counter | null => {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  if (typeof record.label !== "string") return null;
+  if (!isBoundedString(record.label, MAX_LABEL_LENGTH)) return null;
 
   const counter: Counter = { label: record.label };
   if (record.power !== undefined) {
@@ -129,7 +161,7 @@ const sanitizeCounter = (value: unknown): Counter | null => {
     counter.value = record.value;
   }
   if (record.color !== undefined) {
-    if (typeof record.color !== "string") return null;
+    if (!isBoundedString(record.color, MAX_COLOR_LENGTH, true)) return null;
     counter.color = record.color;
   }
 
@@ -142,7 +174,7 @@ const sanitizeShape = (value: unknown): Shape | null => {
   const point = sanitizePointTuple(record.point);
   const size = sanitizePointTuple(record.size);
   if (!point || !size) return null;
-  if (typeof record.id !== "string" || !SHAPE_TYPES.has(record.type as ShapeType)) {
+  if (!isValidId(record.id) || !SHAPE_TYPES.has(record.type as ShapeType)) {
     return null;
   }
   if (!isFiniteNumber(record.srcIndex)) return null;
@@ -155,12 +187,13 @@ const sanitizeShape = (value: unknown): Shape | null => {
     srcIndex: record.srcIndex,
   };
 
-  if (typeof record.text === "string") {
+  if (record.text !== undefined) {
+    if (!isBoundedString(record.text, MAX_TEXT_LENGTH, true)) return null;
     shape.text = record.text;
   }
-  if (Array.isArray(record.src)) {
-    const src = record.src.filter((entry): entry is string => typeof entry === "string");
-    if (src.length !== record.src.length) return null;
+  if (record.src !== undefined) {
+    const src = sanitizeImageSources(record.src);
+    if (!src) return null;
     shape.src = src;
   }
   if (record.rotation !== undefined) {
@@ -181,7 +214,9 @@ const sanitizeShape = (value: unknown): Shape | null => {
     shape.values = values;
   }
   if (record.counters !== undefined) {
-    if (!Array.isArray(record.counters)) return null;
+    if (!Array.isArray(record.counters) || record.counters.length > MAX_COUNTERS) {
+      return null;
+    }
     const counters = record.counters
       .map(sanitizeCounter)
       .filter((counter): counter is Counter => counter !== null);
@@ -189,7 +224,7 @@ const sanitizeShape = (value: unknown): Shape | null => {
     shape.counters = counters;
   }
   if (record.color !== undefined) {
-    if (typeof record.color !== "string") return null;
+    if (!isBoundedString(record.color, MAX_COLOR_LENGTH, true)) return null;
     shape.color = record.color;
   }
 
@@ -200,6 +235,12 @@ const sanitizeCardState = (value: unknown): CardState | null => {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (!Array.isArray(record.cards) || !Array.isArray(record.deck)) return null;
+  if (
+    record.cards.length > MAX_CARDS_PER_ZONE ||
+    record.deck.length > MAX_CARDS_PER_ZONE
+  ) {
+    return null;
+  }
 
   const cards = record.cards.map(sanitizeCard).filter((card): card is Card => card !== null);
   const deck = record.deck.map(sanitizeCard).filter((card): card is Card => card !== null);
@@ -210,7 +251,9 @@ const sanitizeCardState = (value: unknown): CardState | null => {
   return {
     cards,
     deck,
-    lastAction: typeof record.lastAction === "string" ? record.lastAction : undefined,
+    lastAction: isBoundedString(record.lastAction, MAX_LABEL_LENGTH)
+      ? record.lastAction
+      : undefined,
     actionId: isFiniteNumber(record.actionId) ? record.actionId : undefined,
   };
 };
@@ -219,7 +262,7 @@ const sanitizeEditingText = (value: unknown) => {
   if (value === null || value === undefined) return null;
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  if (typeof record.id !== "string" || typeof record.text !== "string") {
+  if (!isValidId(record.id) || !isBoundedString(record.text, MAX_TEXT_LENGTH, true)) {
     return null;
   }
   return { id: record.id, text: record.text };
@@ -311,6 +354,7 @@ export function normalizeDebugSnapshot(value: unknown): DebugSnapshot | null {
   if (!cardState || !camera || !Array.isArray(record.shapes)) {
     return null;
   }
+  if (record.shapes.length > MAX_SHAPES_PER_PEER) return null;
   if (editingText === null && record.editingText !== null && record.editingText !== undefined) {
     return null;
   }
@@ -337,7 +381,7 @@ export function normalizeDebugSnapshot(value: unknown): DebugSnapshot | null {
     cardState,
     shapes,
     selectedShapeIds: Array.isArray(record.selectedShapeIds)
-      ? record.selectedShapeIds.filter((id): id is string => typeof id === "string")
+      ? record.selectedShapeIds.filter(isValidId).slice(0, MAX_SHAPES_PER_PEER)
       : [],
     editingText,
     camera,
@@ -345,10 +389,11 @@ export function normalizeDebugSnapshot(value: unknown): DebugSnapshot | null {
     shapeType: record.shapeType as ShapeType,
     isSnapEnabled: record.isSnapEnabled,
     showCounterControls: record.showCounterControls,
-    selectedHandCardId:
-      typeof record.selectedHandCardId === "string" ? record.selectedHandCardId : null,
+    selectedHandCardId: isValidId(record.selectedHandCardId)
+      ? record.selectedHandCardId
+      : null,
     connectedPeerIds: Array.isArray(record.connectedPeerIds)
-      ? record.connectedPeerIds.filter((id): id is string => typeof id === "string")
+      ? record.connectedPeerIds.filter(isValidId).slice(0, MAX_CONNECTED_PEERS)
       : [],
     meta: sanitizeMeta(record.meta),
   });

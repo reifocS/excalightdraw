@@ -299,7 +299,7 @@ export const createShapesSyncChannel = (
     setState: (next, meta) => {
       if (meta.origin !== "remote") return;
       const fromPeerId = meta.fromPeerId;
-      if (!fromPeerId) return;
+      if (!isValidPeerId(fromPeerId)) return;
 
       const remoteShapes = next[fromPeerId] ?? [];
       const previousRemoteShapes = channelState[fromPeerId];

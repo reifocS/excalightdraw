@@ -10,6 +10,12 @@ import { AgentGameState, type Shape } from "./state.js";
 import { createToolHandlers, TOOL_DEFINITIONS } from "./mcp.js";
 import { loadDeckFromList, fetchCardMetaByImageUrl } from "./scryfall.js";
 import type { Visibility } from "./visibility.js";
+import {
+  normalizeRemoteActionLogEntry,
+  normalizeRemoteActionLogSnapshot,
+  normalizeRemoteCardState,
+  type RemoteCardState,
+} from "./validation.js";
 
 function parseArgs(argv: string[]): { peer: string | null; visibility: Visibility } {
   let peer: string | null = null;
@@ -36,7 +42,7 @@ async function main() {
 
   const gameState = new AgentGameState();
   const remoteShapes: Record<string, Shape[]> = {};
-  let remoteCardState: { cards: number; deck: number; hand: Array<{ id: string; src: string[] }> } | null = null;
+  let remoteCardState: RemoteCardState | null = null;
   const MAX_ACTION_LOG = 200;
   const actionLog: Array<{ timestamp: number; action: string; playerId?: string; playerName?: string; cardsInHand?: number; cardNames?: string[] }> = [];
   const pushActionLog = (entry: (typeof actionLog)[number]) => {
@@ -81,14 +87,15 @@ async function main() {
 
   // Listen for game messages via PeerJS sync client
   agentPeer.onMessage("action-log", (msg) => {
-    const payload = msg.payload as { action?: string; playerId?: string; playerName?: string; cardsInHand?: number; timestamp?: number; cardSrcs?: string[][] };
+    const payload = normalizeRemoteActionLogEntry(msg.payload, msg.meta?.from);
+    if (!payload) return;
     const cardNames = payload.cardSrcs?.map((srcs) => {
       const meta = gameState.lookupCardMeta(srcs[0]);
       return meta?.name ?? srcs[0];
     });
     pushActionLog({
-      timestamp: payload.timestamp ?? Date.now(),
-      action: payload.action ?? "unknown",
+      timestamp: payload.timestamp,
+      action: payload.action,
       playerId: payload.playerId,
       playerName: payload.playerName,
       cardsInHand: payload.cardsInHand,
@@ -99,23 +106,21 @@ async function main() {
   });
 
   agentPeer.onMessage("action-log-snapshot", (msg) => {
-    const payload = msg.payload as { entries?: Array<{ action?: string; playerId?: string; playerName?: string; cardsInHand?: number; timestamp?: number }> };
-    if (payload.entries) {
-      for (const entry of payload.entries) {
-        pushActionLog({
-          timestamp: entry.timestamp ?? Date.now(),
-          action: entry.action ?? "unknown",
-          playerId: entry.playerId,
-          playerName: entry.playerName,
-          cardsInHand: entry.cardsInHand,
-        });
-      }
+    for (const entry of normalizeRemoteActionLogSnapshot(msg.payload, msg.meta?.from)) {
+      pushActionLog({
+        timestamp: entry.timestamp,
+        action: entry.action,
+        playerId: entry.playerId,
+        playerName: entry.playerName,
+        cardsInHand: entry.cardsInHand,
+      });
     }
   });
 
   agentPeer.onMessage("card-state-sync", (msg) => {
-    const payload = msg.payload as { cards: number; deck: number; hand?: Array<{ id: string; src: string[] }> };
-    remoteCardState = { cards: payload.cards, deck: payload.deck, hand: payload.hand ?? [] };
+    const payload = normalizeRemoteCardState(msg.payload);
+    if (!payload) return;
+    remoteCardState = payload;
   });
 
   // Start PeerJS peer

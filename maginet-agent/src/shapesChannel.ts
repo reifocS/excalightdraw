@@ -1,5 +1,10 @@
 import type { SyncChannelPlugin, SyncPeerId } from "@vescofire/peersync";
 import type { Shape } from "./state.js";
+import {
+  isValidPeerId,
+  normalizeRemoteShapeList,
+  normalizeRemoteShapesByPeer,
+} from "./validation.js";
 
 export type ShapesByPeer = Record<string, Shape[]>;
 
@@ -20,26 +25,6 @@ interface AgentShapesChannelOptions {
   subscribeLocalShapes?: (cb: (next: Shape[], prev: Shape[]) => void) => () => void;
   onRemoteShapes?: (peerId: string, shapes: Shape[]) => void;
 }
-
-const isValidShape = (shape: unknown): shape is Shape => {
-  if (!shape || typeof shape !== "object") return false;
-  return typeof (shape as Record<string, unknown>).id === "string";
-};
-
-const normalizeShapes = (value: unknown): Shape[] => {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isValidShape);
-};
-
-const normalizeShapesByPeer = (value: unknown): ShapesByPeer => {
-  if (!value || typeof value !== "object") return {};
-  const normalized: ShapesByPeer = {};
-  for (const [peerId, shapes] of Object.entries(value as Record<string, unknown>)) {
-    if (!peerId) continue;
-    normalized[peerId] = normalizeShapes(shapes);
-  }
-  return normalized;
-};
 
 const areIdsEqual = (a: string[], b: string[]) => {
   if (a.length !== b.length) return false;
@@ -131,8 +116,8 @@ export function createShapesSyncChannel(
     ) => {
       if (meta.origin !== "remote") return;
       const fromPeerId = meta.fromPeerId;
-      if (!fromPeerId) return;
-      const remoteShapes = next[fromPeerId] ?? [];
+      if (!isValidPeerId(fromPeerId)) return;
+      const remoteShapes = normalizeRemoteShapeList(next[fromPeerId] ?? []);
       if (channelState[fromPeerId] === remoteShapes) return;
       channelState = { ...channelState, [fromPeerId]: remoteShapes };
       options.onRemoteShapes?.(fromPeerId, remoteShapes);
@@ -153,16 +138,21 @@ export function createShapesSyncChannel(
       let changed = false;
       const next = { ...base };
       for (const id of patch.removedPeerIds) {
-        if (id in next) { delete next[id]; changed = true; }
+        if (isValidPeerId(id) && id in next) { delete next[id]; changed = true; }
       }
       for (const { peerId, patch: p } of patch.peerPatches) {
+        if (!isValidPeerId(peerId)) continue;
         const current = next[peerId] ?? [];
-        const updated = applyShapeListPatch(current, p);
+        const updated = applyShapeListPatch(current, {
+          upserts: normalizeRemoteShapeList(p.upserts),
+          removedIds: Array.isArray(p.removedIds) ? p.removedIds : [],
+          order: Array.isArray(p.order) ? p.order : null,
+        });
         if (updated !== current) { next[peerId] = updated; changed = true; }
       }
       return changed ? next : base;
     },
     snapshot: (state: ShapesByPeer) => state,
-    hydrate: (raw: unknown) => normalizeShapesByPeer(raw),
+    hydrate: (raw: unknown) => normalizeRemoteShapesByPeer(raw),
   };
 }

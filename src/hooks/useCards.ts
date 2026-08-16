@@ -204,16 +204,23 @@ export interface RelatedUris {
   tcgplayer_infinite_decks: string;
   edhrec: string;
 }
+export const MAX_DECK_LINES = 1_000;
+export const MAX_DECK_CARDS = 200;
+export const MAX_CARD_NAME_LENGTH = 200;
+
 export function processRawText(fromArena: string) {
   if (fromArena.trim() === "") return [];
-  return fromArena.split("\n").flatMap((s) => {
-    const match = s.match(/^(\d+)\s+(.*?)(?:\s*\/\/.*)?$/);
-    if (match) {
-      const [, count, name] = match;
-      return Array(Number(count)).fill(name.trim());
-    }
-    return [];
-  });
+  const names: string[] = [];
+  for (const line of fromArena.split("\n").slice(0, MAX_DECK_LINES)) {
+    const match = line.match(/^(\d{1,4})\s+(.*?)(?:\s*\/\/.*)?$/);
+    if (!match) continue;
+    const [, count, rawName] = match;
+    const name = rawName.trim().slice(0, MAX_CARD_NAME_LENGTH);
+    const copies = Math.min(Number(count), MAX_DECK_CARDS - names.length);
+    for (let i = 0; i < copies; i++) names.push(name);
+    if (names.length >= MAX_DECK_CARDS) break;
+  }
+  return names;
 }
 export function mapDataToCards(data?: Datum[]): Card[] {
   return data?.map(mapDataToCard) ?? [];
