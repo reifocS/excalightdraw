@@ -109,12 +109,15 @@ export function cardReducer(state: CardState, action: CardAction): CardState {
         ...baseState,
         deck: shuffle(state.deck),
       };
-    case "ADD_TO_HAND":
+    case "ADD_TO_HAND": {
+      const card = mapDataToCard(action.payload);
+      if (!card) return state;
       return {
         ...baseState,
-        cards: [...state.cards, mapDataToCard(action.payload)],
-        deck: removeFirst(state.deck, mapDataToCard(action.payload)),
+        cards: [...state.cards, card],
+        deck: removeFirst(state.deck, card),
       };
+    }
     default:
       return baseState;
   }

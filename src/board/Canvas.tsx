@@ -15,6 +15,7 @@ import PropertiesPanel from "./components/PropertiesPanel";
 import ShortcutDock from "./components/ShortcutDock";
 import useCards, {
   Datum,
+  mapDataToCard,
   mapDataToCards,
   processRawText,
 } from "../hooks/useCards";
@@ -61,6 +62,13 @@ const SHORTCUT_DOCK_OPEN_STORAGE_KEY = "maginet:shortcut-dock-open";
 
 const normalizeDeckParam = (value: string) =>
   value.trim().replace(/\r\n/g, "\n");
+
+const describeSnapshotImportFailure = (error: unknown) => {
+  console.error("Failed to import a debug snapshot", error);
+  return error instanceof Error
+    ? `The snapshot could not be imported: ${error.message}`
+    : "The snapshot format is not valid.";
+};
 
 const getInitialShortcutDockOpen = () => {
   if (typeof window === "undefined") return true;
@@ -272,6 +280,7 @@ function Canvas() {
     data,
     isLoading: isDeckLoading,
     error: deckError,
+    notFoundNames: missingDeckCardNames,
   } = useCards(deckNames);
 
   // Related cards data
@@ -416,6 +425,10 @@ function Canvas() {
   };
 
   const addCardToHand = (card: Datum) => {
+    if (!mapDataToCard(card)) {
+      toast.error(`${card.name ?? "That card"} has no image and cannot be added`);
+      return;
+    }
     dispatch({ type: "ADD_TO_HAND", payload: card });
   };
 
@@ -810,6 +823,23 @@ function Canvas() {
   }, [data, dispatch, hasImportedDebugSnapshot, sessionHydrationStatus]);
 
   useEffect(() => {
+    if (missingDeckCardNames.length === 0) return;
+    toast.error(
+      `${missingDeckCardNames.length} card${
+        missingDeckCardNames.length === 1 ? "" : "s"
+      } not found on Scryfall: ${missingDeckCardNames.join(", ")}`,
+      { id: "deck-cards-not-found" }
+    );
+  }, [missingDeckCardNames]);
+
+  useEffect(() => {
+    if (!deckError) return;
+    toast.error(`Deck failed to load. ${deckError.message}`, {
+      id: "deck-load-error",
+    });
+  }, [deckError]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const debugApi: DebugSnapshotApi = {
@@ -818,8 +848,8 @@ function Canvas() {
       importSnapshot: (input) => {
         try {
           return debugSnapshotHandlersRef.current.importSnapshot(input);
-        } catch {
-          return { ok: false, error: "The snapshot format is not valid." };
+        } catch (error) {
+          return { ok: false, error: describeSnapshotImportFailure(error) };
         }
       },
     };
@@ -1132,8 +1162,8 @@ function Canvas() {
           onLoadDebugSnapshot={(raw) => {
             try {
               return importDebugSnapshot(raw);
-            } catch {
-              return { ok: false, error: "The snapshot format is not valid." };
+            } catch (error) {
+              return { ok: false, error: describeSnapshotImportFailure(error) };
             }
           }}
         />

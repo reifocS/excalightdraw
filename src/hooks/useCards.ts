@@ -1,10 +1,32 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useQuery } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useMemo } from "react";
 import { generateId, shuffle } from "../utils/math";
 import { Card } from "../types/canvas";
 
-const fetchCards = async (names: string[]) => {
+export const MAX_DECK_SIZE = 200;
+const SCRYFALL_BATCH_SIZE = 75;
+
+const describeScryfallFailure = async (response: Response) => {
+  const body = await response.text().catch(() => "");
+  let details = body;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (parsed && typeof parsed === "object" && "details" in parsed) {
+      const parsedDetails = (parsed as { details: unknown }).details;
+      if (typeof parsedDetails === "string") {
+        details = parsedDetails;
+      }
+    }
+  } catch {
+    // Scryfall returned a non-JSON body, fall back to the raw text.
+  }
+
+  const suffix = details.trim() ? `: ${details.trim()}` : "";
+  return `Scryfall request failed (${response.status} ${response.statusText})${suffix}`;
+};
+
+const fetchCards = async (names: string[]): Promise<CardCollection> => {
   const response = await fetch("https://api.scryfall.com/cards/collection", {
     method: "POST",
     mode: "cors",
@@ -16,24 +38,34 @@ const fetchCards = async (names: string[]) => {
     }),
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await describeScryfallFailure(response));
   }
 
-  return response.json();
+  try {
+    return (await response.json()) as CardCollection;
+  } catch (error) {
+    throw new Error(
+      `Scryfall returned a response that could not be parsed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
 };
 
 const getCards = async (names: string[]) => {
   names = [...names];
-  if (names.length <= 75) {
+  if (names.length <= SCRYFALL_BATCH_SIZE) {
     return [await fetchCards(names)];
   }
-  if (names.length > 200) {
-    throw new Error("Too much cards");
+  if (names.length > MAX_DECK_SIZE) {
+    throw new Error(
+      `Too many cards: ${names.length} requested, the limit is ${MAX_DECK_SIZE}.`
+    );
   }
 
   const cardPromises = [];
   while (names.length) {
-    const chunk = names.splice(0, 75).filter(Boolean);
+    const chunk = names.splice(0, SCRYFALL_BATCH_SIZE).filter(Boolean);
     cardPromises.push(fetchCards(chunk));
   }
 
@@ -41,28 +73,39 @@ const getCards = async (names: string[]) => {
   return cardArrays.flat();
 };
 
+export function collectNotFoundNames(collections?: CardCollection[]): string[] {
+  if (!collections) return [];
+  const names = collections.flatMap((collection) =>
+    (collection.not_found ?? [])
+      .map((entry) => (typeof entry?.name === "string" ? entry.name : null))
+      .filter((name): name is string => Boolean(name))
+  );
+  return Array.from(new Set(names));
+}
+
 function useCards(names: string[]) {
-  // Queries
-  return useQuery<CardCollection[], Error, Datum[]>({
+  const query = useQuery<CardCollection[], Error>({
     queryKey: ["decks", names],
     queryFn: () => getCards(names),
     enabled: names.length > 0,
     structuralSharing: false,
     refetchOnWindowFocus: false,
-    select: useCallback((data: CardCollection[]) => {
-      const cards = data.flatMap((d) => d.data);
-      for (const d of data) {
-        if (d.not_found && d.not_found.length > 0) {
-          console.warn(
-            `${d.not_found
-              .map((not_found) => not_found.name)
-              .join(", ")} not found`
-          );
-        }
-      }
-      return shuffle(cards);
-    }, []),
   });
+
+  const { data: collections } = query;
+  const data = useMemo(
+    () =>
+      collections
+        ? shuffle(collections.flatMap((collection) => collection.data ?? []))
+        : undefined,
+    [collections]
+  );
+  const notFoundNames = useMemo(
+    () => collectNotFoundNames(collections),
+    [collections]
+  );
+
+  return { ...query, data, notFoundNames };
 }
 export default useCards;
 
@@ -216,20 +259,38 @@ export function processRawText(fromArena: string) {
   });
 }
 export function mapDataToCards(data?: Datum[]): Card[] {
-  return data?.map(mapDataToCard) ?? [];
+  if (!data) return [];
+  const cards: Card[] = [];
+  for (const datum of data) {
+    const card = mapDataToCard(datum);
+    if (!card) {
+      console.warn(`Skipping "${datum?.name ?? "unknown card"}": no card image`);
+      continue;
+    }
+    cards.push(card);
+  }
+  return cards;
 }
 
-export function mapDataToCard(data: Datum): Card {
-  if (data.image_uris?.normal) {
+/** Returns null when the card has no usable image, so callers can skip it. */
+export function mapDataToCard(data: Datum): Card | null {
+  if (data?.image_uris?.normal) {
     return {
       id: generateId(),
       src: [data.image_uris.normal],
     };
-  } else if (data.card_faces?.length) {
+  }
+
+  const faceSrcs =
+    data?.card_faces
+      ?.map((face) => face.image_uris?.normal)
+      .filter((src): src is string => Boolean(src)) ?? [];
+  if (faceSrcs.length > 0) {
     return {
       id: generateId(),
-      src: data.card_faces.map((face) => face.image_uris.normal),
+      src: faceSrcs,
     };
   }
-  throw new Error("Invalid card data");
+
+  return null;
 }

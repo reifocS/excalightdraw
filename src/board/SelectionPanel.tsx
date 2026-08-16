@@ -1,5 +1,6 @@
 import React from "react";
 import { useLocation, Form } from "react-router-dom";
+import toast from "react-hot-toast";
 import useModal from "../hooks/useModal";
 import { usePeerStore } from "../hooks/usePeerConnection";
 import { useShapeStore } from "../hooks/useShapeStore";
@@ -8,6 +9,7 @@ import { Camera, Mode, Card, ShapeType } from "../types/canvas";
 import Input, { Textarea } from "../components/ui/Input";
 import SnapshotModal from "./components/SnapshotModal";
 import { DebugSnapshotImportResult } from "../debug/stateSnapshot";
+import { copyTextToClipboard } from "../utils/clipboard";
 
 type TooltipFace = {
   name?: string;
@@ -397,9 +399,15 @@ export function SelectionPanel({
   const isTextMode = mode === "create" && shapeType === "text";
   const isRectangleMode = mode === "create" && shapeType === "rectangle";
 
-  const handleCopyPeerId = () => {
+  const handleCopyPeerId = async () => {
     if (!peer?.id) return;
-    navigator.clipboard.writeText(peer.id);
+    try {
+      await copyTextToClipboard(peer.id);
+    } catch (error) {
+      console.error("Failed to copy the peer ID", error);
+      toast.error("Could not copy your peer ID. Copy it manually instead.");
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -513,7 +521,9 @@ export function SelectionPanel({
         </div>
         <button
           className="selection-panel__pill"
-          onClick={handleCopyPeerId}
+          onClick={() => {
+            void handleCopyPeerId();
+          }}
           disabled={!canCopyPeerId}
         >
           {copied ? "Copied" : "Copy"}
