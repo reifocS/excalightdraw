@@ -26,6 +26,48 @@ function getPoint(
     "pressure" in e ? Number(e.pressure.toPrecision(5)) || 0.5 : 0.5,
   ];
 }
+type ModifierKeys = Pick<
+  PointerInfo,
+  "shiftKey" | "ctrlKey" | "metaKey" | "altKey"
+>;
+
+function getModifiers(e: {
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+}): ModifierKeys {
+  return {
+    shiftKey: e.shiftKey,
+    ctrlKey: e.ctrlKey,
+    metaKey: isDarwin() ? e.metaKey : e.ctrlKey,
+    altKey: e.altKey,
+  };
+}
+
+function createPointerInfo({
+  event,
+  source,
+  target,
+  pointerId,
+  pressure,
+}: {
+  event: TouchEvent | React.TouchEvent | PointerEvent | React.PointerEvent;
+  source: Touch | React.Touch | PointerEvent | React.PointerEvent;
+  target: string;
+  pointerId: number;
+  pressure: number;
+}): PointerInfo {
+  return {
+    target,
+    pointerId,
+    origin: getPoint(source),
+    point: getPoint(source),
+    pressure,
+    ...getModifiers(event),
+  };
+}
+
 class Inputs {
   activePointerId?: number;
   pointerUpTime = 0;
@@ -33,22 +75,17 @@ class Inputs {
   pointer?: PointerInfo;
 
   touchStart(e: TouchEvent | React.TouchEvent, target: string) {
-    const { shiftKey, ctrlKey, metaKey, altKey } = e;
     e.preventDefault();
 
     const touch = e.changedTouches[0];
 
-    const info = {
+    const info = createPointerInfo({
+      event: e,
+      source: touch,
       target,
       pointerId: touch.identifier,
-      origin: getPoint(touch),
-      point: getPoint(touch),
       pressure: 0.5,
-      shiftKey,
-      ctrlKey,
-      metaKey: isDarwin() ? metaKey : ctrlKey,
-      altKey,
-    };
+    });
 
     this.points[touch.identifier] = info;
     this.activePointerId = touch.identifier;
@@ -58,7 +95,6 @@ class Inputs {
   }
 
   touchMove(e: TouchEvent | React.TouchEvent) {
-    const { shiftKey, ctrlKey, metaKey, altKey } = e;
     e.preventDefault();
 
     const touch = e.changedTouches[0];
@@ -70,10 +106,7 @@ class Inputs {
       pointerId: touch.identifier,
       point: getPoint(touch),
       pressure: 0.5,
-      shiftKey,
-      ctrlKey,
-      metaKey: isDarwin() ? metaKey : ctrlKey,
-      altKey,
+      ...getModifiers(e),
     };
 
     if (this.points[touch.identifier]) {
@@ -85,19 +118,13 @@ class Inputs {
   }
 
   pointerDown(e: PointerEvent | React.PointerEvent, target: string) {
-    const { shiftKey, ctrlKey, metaKey, altKey } = e;
-
-    const info = {
+    const info = createPointerInfo({
+      event: e,
+      source: e,
       target,
       pointerId: e.pointerId,
-      origin: getPoint(e),
-      point: getPoint(e),
       pressure: e.pressure || 0.5,
-      shiftKey,
-      ctrlKey,
-      metaKey: isDarwin() ? metaKey : ctrlKey,
-      altKey,
-    };
+    });
 
     this.points[e.pointerId] = info;
     this.activePointerId = e.pointerId;
@@ -107,27 +134,19 @@ class Inputs {
   }
 
   pointerEnter(e: PointerEvent | React.PointerEvent, target: string) {
-    const { shiftKey, ctrlKey, metaKey, altKey } = e;
-
-    const info = {
+    const info = createPointerInfo({
+      event: e,
+      source: e,
       target,
       pointerId: e.pointerId,
-      origin: getPoint(e),
-      point: getPoint(e),
       pressure: e.pressure || 0.5,
-      shiftKey,
-      ctrlKey,
-      metaKey: isDarwin() ? metaKey : ctrlKey,
-      altKey,
-    };
+    });
 
     this.pointer = info;
     return info;
   }
 
   pointerMove(e: PointerEvent | React.PointerEvent, target = "") {
-    const { shiftKey, ctrlKey, metaKey, altKey } = e;
-
     const prev = this.points[e.pointerId];
 
     const info = {
@@ -136,10 +155,7 @@ class Inputs {
       pointerId: e.pointerId,
       point: getPoint(e),
       pressure: e.pressure || 0.5,
-      shiftKey,
-      ctrlKey,
-      metaKey: isDarwin() ? metaKey : ctrlKey,
-      altKey,
+      ...getModifiers(e),
     };
 
     if (this.points[e.pointerId]) {
@@ -152,8 +168,6 @@ class Inputs {
   }
 
   pointerUp = (e: PointerEvent | React.PointerEvent, target = "") => {
-    const { shiftKey, ctrlKey, metaKey, altKey } = e;
-
     const prev = this.points[e.pointerId];
 
     const info = {
@@ -162,10 +176,7 @@ class Inputs {
       origin: prev?.origin || getPoint(e),
       point: getPoint(e),
       pressure: e.pressure || 0.5,
-      shiftKey,
-      ctrlKey,
-      metaKey: isDarwin() ? metaKey : ctrlKey,
-      altKey,
+      ...getModifiers(e),
     };
 
     delete this.points[e.pointerId];

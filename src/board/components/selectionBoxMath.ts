@@ -1,4 +1,15 @@
-export type Point2D = [number, number];
+import {
+  addPoints,
+  clampScaleMagnitude,
+  getSign,
+  normalizeAngleDelta,
+  Point2D,
+  rotateVector,
+  subtractPoints,
+} from "../../utils/geometry";
+
+export type { Point2D };
+export { getPointerAngleFromCenter, normalizeAngleDelta } from "../../utils/geometry";
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -32,7 +43,8 @@ export const ROTATION_HANDLE_MIN_SCREEN_DISTANCE = 40;
 export const ROTATION_HANDLE_MAX_SCREEN_DISTANCE = 72;
 const ROTATION_HANDLE_SCREEN_SCALE = 0.6;
 
-const HANDLE_DIRECTIONS: Record<ResizeHandle, Point2D> = {
+/** Unit offsets from the selection center toward each resize handle. */
+export const HANDLE_DIRECTIONS: Record<ResizeHandle, Point2D> = {
   nw: [-1, -1],
   n: [0, -1],
   ne: [1, -1],
@@ -41,6 +53,17 @@ const HANDLE_DIRECTIONS: Record<ResizeHandle, Point2D> = {
   s: [0, 1],
   sw: [-1, 1],
   w: [-1, 0],
+};
+
+export const OPPOSITE_HANDLES: Record<ResizeHandle, ResizeHandle> = {
+  nw: "se",
+  n: "s",
+  ne: "sw",
+  e: "w",
+  se: "nw",
+  s: "n",
+  sw: "ne",
+  w: "e",
 };
 
 const HANDLE_CURSOR_INDEX: Record<ResizeHandle, number> = {
@@ -61,53 +84,6 @@ const RESIZE_CURSORS = [
   "nwse-resize",
 ] as const;
 
-function rotateVector(vector: Point2D, angleDegrees: number): Point2D {
-  if (angleDegrees === 0) return vector;
-
-  const angle = (angleDegrees * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return [
-    vector[0] * cos - vector[1] * sin,
-    vector[0] * sin + vector[1] * cos,
-  ];
-}
-
-function add(left: Point2D, right: Point2D): Point2D {
-  return [left[0] + right[0], left[1] + right[1]];
-}
-
-function subtract(left: Point2D, right: Point2D): Point2D {
-  return [left[0] - right[0], left[1] - right[1]];
-}
-
-function getSign(value: number) {
-  return value < 0 ? -1 : 1;
-}
-
-function clampScaleMagnitude(scale: number, minimumMagnitude: number) {
-  return getSign(scale) * Math.max(Math.abs(scale), minimumMagnitude);
-}
-
-export function getPointerAngleFromCenter(
-  center: Point2D,
-  point: Point2D
-) {
-  const dx = point[0] - center[0];
-  const dy = point[1] - center[1];
-  return (Math.atan2(dy, dx) * 180) / Math.PI + 90;
-}
-
-export function normalizeAngleDelta(delta: number) {
-  let normalized = ((delta + 180) % 360 + 360) % 360 - 180;
-
-  if (normalized === -180 && delta > 0) {
-    normalized = 180;
-  }
-
-  return normalized;
-}
-
 export function getDraggedRotation(
   initialRotation: number,
   startPointerAngle: number,
@@ -116,10 +92,64 @@ export function getDraggedRotation(
   return initialRotation + normalizeAngleDelta(currentPointerAngle - startPointerAngle);
 }
 
+export const ROTATION_SNAP_DEGREES = 15;
+
+export function snapRotation(rotation: number, shouldSnap: boolean) {
+  return shouldSnap
+    ? Math.round(rotation / ROTATION_SNAP_DEGREES) * ROTATION_SNAP_DEGREES
+    : rotation;
+}
+
 export function getResizeCursor(handle: ResizeHandle, rotation: number) {
   const rotationSteps = Math.round(rotation / 45);
   const index = ((HANDLE_CURSOR_INDEX[handle] + rotationSteps) % 4 + 4) % 4;
   return RESIZE_CURSORS[index];
+}
+
+type HandleDragScaleOptions = {
+  direction: Point2D;
+  dimensions: ShapeDimensions;
+  rotation: number;
+  handlePoint: Point2D;
+  scaleOrigin: Point2D;
+  startPointer: Point2D;
+  currentPointer: Point2D;
+};
+
+/**
+ * Signed scale factors along the selection's local axes for a handle drag.
+ * The offset between the pointer press and the handle is preserved so an
+ * off-center grab does not make the selection jump on its first move.
+ */
+export function getHandleDragScale({
+  direction,
+  dimensions,
+  rotation,
+  handlePoint,
+  scaleOrigin,
+  startPointer,
+  currentPointer,
+}: HandleDragScaleOptions): Point2D {
+  const cursorHandleOffset = subtractPoints(startPointer, handlePoint);
+  const effectivePointer = subtractPoints(currentPointer, cursorHandleOffset);
+  const localDistance = rotateVector(
+    subtractPoints(effectivePointer, scaleOrigin),
+    -rotation
+  );
+  const initialLocalDistance: Point2D = [
+    direction[0] * dimensions.width,
+    direction[1] * dimensions.height,
+  ];
+
+  const scaleX =
+    direction[0] === 0 ? 1 : localDistance[0] / initialLocalDistance[0];
+  const scaleY =
+    direction[1] === 0 ? 1 : localDistance[1] / initialLocalDistance[1];
+
+  return [
+    Number.isFinite(scaleX) ? scaleX : 1,
+    Number.isFinite(scaleY) ? scaleY : 1,
+  ];
 }
 
 /**
@@ -153,23 +183,18 @@ export function getResizedShape({
     (direction[1] * originalHeight) / 2,
   ];
   const originFromCenter: Point2D = [-handleFromCenter[0], -handleFromCenter[1]];
-  const handlePoint = add(originalCenter, rotateVector(handleFromCenter, rotation));
-  const scaleOrigin = add(originalCenter, rotateVector(originFromCenter, rotation));
+  const handlePoint = addPoints(originalCenter, rotateVector(handleFromCenter, rotation));
+  const scaleOrigin = addPoints(originalCenter, rotateVector(originFromCenter, rotation));
 
-  // Preserve where inside the handle the pointer was pressed, so an off-center
-  // grab does not make the selection jump on its first move.
-  const cursorHandleOffset = subtract(startPointer, handlePoint);
-  const effectivePointer = subtract(currentPointer, cursorHandleOffset);
-  const localDistance = rotateVector(subtract(effectivePointer, scaleOrigin), -rotation);
-  const initialLocalDistance: Point2D = [
-    direction[0] * originalWidth,
-    direction[1] * originalHeight,
-  ];
-
-  let scaleX = direction[0] === 0 ? 1 : localDistance[0] / initialLocalDistance[0];
-  let scaleY = direction[1] === 0 ? 1 : localDistance[1] / initialLocalDistance[1];
-  if (!Number.isFinite(scaleX)) scaleX = 1;
-  if (!Number.isFinite(scaleY)) scaleY = 1;
+  let [scaleX, scaleY] = getHandleDragScale({
+    direction,
+    dimensions: originalDimensions,
+    rotation,
+    handlePoint,
+    scaleOrigin,
+    startPointer,
+    currentPointer,
+  });
 
   const shouldResizeUniformly = lockAspectRatio || getUniformDimensions !== undefined;
   let uniformScale: number | null = null;
@@ -225,7 +250,7 @@ export function getResizedShape({
     [extentFromOrigin[0] / 2, extentFromOrigin[1] / 2],
     rotation
   );
-  const nextCenter = add(scaleOrigin, centerFromOrigin);
+  const nextCenter = addPoints(scaleOrigin, centerFromOrigin);
 
   return {
     point: [

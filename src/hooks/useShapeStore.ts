@@ -57,6 +57,49 @@ interface ShapeStore {
   shouldSkipHistory: () => boolean;
 }
 
+function mapSelectedShapes(
+  state: Pick<ShapeStore, "shapes" | "selectedShapeIds">,
+  transform: (shape: Shape) => Shape
+) {
+  const selected = new Set(state.selectedShapeIds);
+  return state.shapes.map((shape) =>
+    selected.has(shape.id) ? transform(shape) : shape
+  );
+}
+
+function partitionSelectedShapes(
+  state: Pick<ShapeStore, "shapes" | "selectedShapeIds">
+) {
+  const selected = new Set(state.selectedShapeIds);
+  return {
+    selected: state.shapes.filter((shape) => selected.has(shape.id)),
+    rest: state.shapes.filter((shape) => !selected.has(shape.id)),
+  };
+}
+
+function getSelectedImageCards(
+  state: Pick<ShapeStore, "shapes" | "selectedShapeIds">
+): Card[] {
+  const selected = new Set(state.selectedShapeIds);
+  return state.shapes
+    .filter((shape) => selected.has(shape.id) && shape.type === "image")
+    .map((shape) => ({
+      id: shape.id,
+      src: shape.src as string[],
+      srcIndex: shape.srcIndex,
+    }));
+}
+
+function createHistoryEntry(
+  state: Pick<ShapeStore, "shapes" | "selectedShapeIds">
+): HistoryEntry {
+  return {
+    shapes: structuredClone(state.shapes),
+    selectedShapeIds: [...state.selectedShapeIds],
+    timestamp: Date.now(),
+  };
+}
+
 export const useShapeStore = create<ShapeStore>((set, get) => ({
   shapes: [],
   selectedShapeIds: [],
@@ -82,10 +125,8 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     );
   },
   setShapes: (shapes) => {
-    // Push history before updating shapes, unless we're in the middle of an operation
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    // Push history before updating shapes (skipped while an operation is in progress)
+    get().pushHistory();
 
     if (typeof shapes === "function") {
       set((state) => ({ shapes: shapes(state.shapes) }));
@@ -94,9 +135,7 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     }
   },
   addShape: (shape) => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({ shapes: [...state.shapes, shape] }));
   },
   updateShape: (id, updates) =>
@@ -106,9 +145,7 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
       ),
     })),
   deleteShape: (id) => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
       shapes: state.shapes.filter((shape) => shape.id !== id),
     }));
@@ -144,50 +181,34 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
       };
     }),
   flipSelectedShapes: () => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id)
-          ? flipShape(shape)
-          : shape
-      ),
+      shapes: mapSelectedShapes(state, flipShape),
     }));
   },
   rotateSelectedShapes: (angle) => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id)
-          ? { ...shape, rotation: (shape.rotation || 0) + angle }
-          : shape
-      ),
+      shapes: mapSelectedShapes(state, (shape) => ({
+        ...shape,
+        rotation: (shape.rotation || 0) + angle,
+      })),
     }));
   },
   engageSelected: () => {
     const { selectedShapeIds } = get();
     if (selectedShapeIds.length === 0) return;
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id) &&
-          (shape.type === "image" || shape.type === "rectangle")
-          ? shape.rotation !== 0
-            ? rotateShape(shape, -90)
-            : rotateShape(shape, 90)
+      shapes: mapSelectedShapes(state, (shape) =>
+        shape.type === "image" || shape.type === "rectangle"
+          ? rotateShape(shape, shape.rotation !== 0 ? -90 : 90)
           : shape
       ),
     }));
   },
   tapShape: (id) => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
       shapes: state.shapes.map((shape) => {
         if (shape.id === id && shape.type === "image") {
@@ -199,9 +220,7 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     }));
   },
   untapAll: () => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
       shapes: state.shapes.map((shape) =>
         (shape.type === "image" || shape.type === "rectangle") && shape.rotation
@@ -213,9 +232,7 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
   copySelected: () => {
     const { shapes, selectedShapeIds } = get();
     if (selectedShapeIds.length === 0) return;
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     const copies = shapes
       .filter((shape) => selectedShapeIds.includes(shape.id))
       .map((shape) => ({
@@ -226,81 +243,60 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     set((state) => ({ shapes: [...state.shapes, ...copies] }));
   },
   updateCountersOnSelected: (counters) => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id) && shape.type === "image"
-          ? { ...shape, counters }
-          : shape
+      shapes: mapSelectedShapes(state, (shape) =>
+        shape.type === "image" ? { ...shape, counters } : shape
       ),
     }));
   },
   clearCountersOnSelected: () => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id) && shape.type === "image"
-          ? { ...shape, counters: [] }
-          : shape
+      shapes: mapSelectedShapes(state, (shape) =>
+        shape.type === "image" ? { ...shape, counters: [] } : shape
       ),
     }));
   },
   changeColorOnSelected: (color) => {
     const { selectedShapeIds } = get();
     if (selectedShapeIds.length !== 1) return;
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id) ? { ...shape, color } : shape
-      ),
+      shapes: mapSelectedShapes(state, (shape) => ({ ...shape, color })),
     }));
   },
   sendSelectedToBack: () => {
-    const { shapes, selectedShapeIds } = get();
-    if (selectedShapeIds.length === 0) return;
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
-    const selected = shapes.filter((s) => selectedShapeIds.includes(s.id));
-    const rest = shapes.filter((s) => !selectedShapeIds.includes(s.id));
+    const state = get();
+    if (state.selectedShapeIds.length === 0) return;
+    state.pushHistory();
+    const { selected, rest } = partitionSelectedShapes(state);
     set({ shapes: [...selected, ...rest], selectedShapeIds: [] });
   },
   sendSelectedToFront: () => {
-    const { shapes, selectedShapeIds } = get();
-    if (selectedShapeIds.length === 0) return;
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
-    const selected = shapes.filter((s) => selectedShapeIds.includes(s.id));
-    const rest = shapes.filter((s) => !selectedShapeIds.includes(s.id));
+    const state = get();
+    if (state.selectedShapeIds.length === 0) return;
+    state.pushHistory();
+    const { selected, rest } = partitionSelectedShapes(state);
     set({ shapes: [...rest, ...selected], selectedShapeIds: [] });
   },
   increaseSrcIndexOnSelected: () => {
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    get().pushHistory();
     set((state) => ({
-      shapes: state.shapes.map((shape) =>
-        state.selectedShapeIds.includes(shape.id) && shape.type === "image"
-          ? { ...shape, srcIndex: (shape.srcIndex + 1) % (shape.src?.length ?? 1) }
+      shapes: mapSelectedShapes(state, (shape) =>
+        shape.type === "image"
+          ? {
+            ...shape,
+            srcIndex: (shape.srcIndex + 1) % (shape.src?.length ?? 1),
+          }
           : shape
       ),
     }));
   },
   removeSelectedImages: () => {
-    const { shapes, selectedShapeIds } = get();
-    const removed: Card[] = shapes
-      .filter((s) => selectedShapeIds.includes(s.id) && s.type === "image")
-      .map((s) => ({ id: s.id, src: s.src as string[], srcIndex: s.srcIndex }));
-    if (!get().shouldSkipHistory()) {
-      get().pushHistory();
-    }
+    const { selectedShapeIds } = get();
+    const removed = getSelectedImageCards(get());
+    get().pushHistory();
     set((state) => ({
       shapes: state.shapes.filter(
         (s) => !(s.type === "image" && selectedShapeIds.includes(s.id))
@@ -309,25 +305,14 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     }));
     return removed;
   },
-  getSelectedImages: () => {
-    const { shapes, selectedShapeIds } = get();
-    return shapes
-      .filter((s) => selectedShapeIds.includes(s.id) && s.type === "image")
-      .map((s) => ({ id: s.id, src: s.src as string[], srcIndex: s.srcIndex }));
-  },
+  getSelectedImages: () => getSelectedImageCards(get()),
   pushHistory: () => {
     // Skip if in the middle of an operation
     if (get().shouldSkipHistory()) {
       return;
     }
 
-    const state = get();
-
-    const entry: HistoryEntry = {
-      shapes: structuredClone(state.shapes),
-      selectedShapeIds: [...state.selectedShapeIds],
-      timestamp: Date.now(),
-    };
+    const entry = createHistoryEntry(get());
 
     set((state) => ({
       history: {
@@ -343,11 +328,7 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     if (state.history.past.length === 0) return;
 
     // Save current state to future
-    const current: HistoryEntry = {
-      shapes: structuredClone(state.shapes),
-      selectedShapeIds: [...state.selectedShapeIds],
-      timestamp: Date.now(),
-    };
+    const current = createHistoryEntry(state);
 
     // Pop from past
     const previous = state.history.past[state.history.past.length - 1];
@@ -370,11 +351,7 @@ export const useShapeStore = create<ShapeStore>((set, get) => ({
     if (state.history.future.length === 0) return;
 
     // Save current state to past
-    const current: HistoryEntry = {
-      shapes: structuredClone(state.shapes),
-      selectedShapeIds: [...state.selectedShapeIds],
-      timestamp: Date.now(),
-    };
+    const current = createHistoryEntry(state);
 
     // Pop from future
     const next = state.history.future[0];
