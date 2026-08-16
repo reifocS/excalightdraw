@@ -1,5 +1,13 @@
 import { Shape as ShapeType } from "../../types/canvas";
 import { getBounds } from "../../utils/canvas_utils";
+import {
+  degreesToRadians,
+  getBoxCorners,
+  getPointsExtent,
+  Point2D,
+  rotatePoint,
+  rotateVector,
+} from "../../utils/geometry";
 
 type ShapeDimensions = {
   width: number;
@@ -28,36 +36,6 @@ type BoundsLike = {
   width: number;
   height: number;
 };
-
-function rotateVector(
-  vector: [number, number],
-  angleDegrees: number
-): [number, number] {
-  if (angleDegrees === 0) {
-    return vector;
-  }
-
-  const angle = (angleDegrees * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  return [
-    vector[0] * cos - vector[1] * sin,
-    vector[0] * sin + vector[1] * cos,
-  ];
-}
-
-function rotatePoint(
-  point: [number, number],
-  center: [number, number],
-  rotation: number
-): [number, number] {
-  const offset = rotateVector(
-    [point[0] - center[0], point[1] - center[1]],
-    rotation
-  );
-  return [center[0] + offset[0], center[1] + offset[1]];
-}
 
 function getRotatedTopLeftOffset(
   dimensions: ShapeDimensions,
@@ -109,18 +87,13 @@ export function getRotatedShapeCorners(
   pointOverride?: [number, number]
 ) {
   const bounds = getShapeLocalBounds(shape, pointOverride);
-  const center: [number, number] = [
+  const center: Point2D = [
     bounds.x + bounds.width / 2,
     bounds.y + bounds.height / 2,
   ];
 
-  return [
-    [bounds.x, bounds.y],
-    [bounds.x + bounds.width, bounds.y],
-    [bounds.x + bounds.width, bounds.y + bounds.height],
-    [bounds.x, bounds.y + bounds.height],
-  ].map((point) =>
-    rotatePoint(point as [number, number], center, shape.rotation || 0)
+  return getBoxCorners(bounds).map((point) =>
+    rotatePoint(point, center, shape.rotation || 0)
   );
 }
 
@@ -128,13 +101,9 @@ export function getShapePageBounds(
   shape: ShapeType,
   pointOverride?: [number, number]
 ): ShapePageBounds {
-  const corners = getRotatedShapeCorners(shape, pointOverride);
-  const xs = corners.map(([x]) => x);
-  const ys = corners.map(([, y]) => y);
-  const left = Math.min(...xs);
-  const right = Math.max(...xs);
-  const top = Math.min(...ys);
-  const bottom = Math.max(...ys);
+  const { left, right, top, bottom } = getPointsExtent(
+    getRotatedShapeCorners(shape, pointOverride)
+  );
 
   return {
     left,
@@ -148,7 +117,7 @@ export function getShapePageBounds(
   };
 }
 
-function projectPoints(points: [number, number][], axis: [number, number]) {
+function projectPoints(points: Point2D[], axis: Point2D) {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
 
@@ -163,14 +132,9 @@ function projectPoints(points: [number, number][], axis: [number, number]) {
 
 export function doesShapeIntersectBounds(shape: ShapeType, bounds: BoundsLike) {
   const shapeCorners = getRotatedShapeCorners(shape);
-  const boundsCorners: [number, number][] = [
-    [bounds.x, bounds.y],
-    [bounds.x + bounds.width, bounds.y],
-    [bounds.x + bounds.width, bounds.y + bounds.height],
-    [bounds.x, bounds.y + bounds.height],
-  ];
-  const rotation = ((shape.rotation || 0) * Math.PI) / 180;
-  const axes: [number, number][] = [
+  const boundsCorners = getBoxCorners(bounds);
+  const rotation = degreesToRadians(shape.rotation || 0);
+  const axes: Point2D[] = [
     [1, 0],
     [0, 1],
     [Math.cos(rotation), Math.sin(rotation)],

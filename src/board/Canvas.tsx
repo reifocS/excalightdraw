@@ -32,6 +32,7 @@ import EditingTextShape from "./EditingTextShape";
 import { useGamePersistence } from "../hooks/useGamePersistence";
 import { useCanvasGestures } from "../hooks/useCanvasGestures";
 import { useObjectSnapping } from "../hooks/useObjectSnapping";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { doesShapeIntersectBounds } from "./components/shapeTransforms";
 import { MultiSelectionBox } from "./components/MultiSelectionBox";
 import {
@@ -182,11 +183,7 @@ function Canvas() {
     width: typeof window === "undefined" ? 0 : window.innerWidth,
     height: typeof window === "undefined" ? 0 : window.innerHeight,
   }));
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window === "undefined"
-      ? false
-      : window.matchMedia("(max-width: 720px)").matches
-  );
+  const isMobile = useIsMobile();
   const [showCounterControls, setShowCounterControls] = useState(false);
   const [hasImportedDebugSnapshot, setHasImportedDebugSnapshot] = useState(false);
 
@@ -340,16 +337,6 @@ function Canvas() {
     return () => {
       window.removeEventListener("resize", handleResize);
     };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const media = window.matchMedia("(max-width: 720px)");
-    const handleChange = (event: MediaQueryListEvent) => {
-      setIsMobile(event.matches);
-    };
-    media.addEventListener("change", handleChange);
-    return () => media.removeEventListener("change", handleChange);
   }, []);
 
   useEffect(() => {

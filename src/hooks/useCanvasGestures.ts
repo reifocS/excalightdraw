@@ -118,29 +118,24 @@ export function useCanvasGestures({ isSetupComplete }: UseCanvasGesturesOptions)
     }
   };
 
+  const applyZoomFactor = (point: number[], factor: number) => {
+    const nextZ = getCameraZoom(cameraTargetRef.current.z * factor);
+    const worldPoint = screenToWorld(point, cameraRef.current);
+    zoomAnchorRef.current = { screen: point, world: worldPoint };
+    applyCameraTarget({
+      x: point[0] / nextZ - worldPoint[0],
+      y: point[1] / nextZ - worldPoint[1],
+      z: nextZ,
+    });
+  };
+
   const applyZoomDelta = (point: number[], delta: number) => {
     if (delta === 0) return;
-    const current = cameraRef.current;
-    const target = cameraTargetRef.current;
-    const zoomFactor = Math.exp(-delta * 0.008);
-    const nextZ = getCameraZoom(target.z * zoomFactor);
-    const worldPoint = screenToWorld(point, current);
-    zoomAnchorRef.current = { screen: point, world: worldPoint };
-    const nextX = point[0] / nextZ - worldPoint[0];
-    const nextY = point[1] / nextZ - worldPoint[1];
-    applyCameraTarget({ x: nextX, y: nextY, z: nextZ });
+    applyZoomFactor(point, Math.exp(-delta * 0.008));
   };
 
   const applyZoomStep = (point: number[], direction: "in" | "out") => {
-    const factor = direction === "in" ? 1.12 : 1 / 1.12;
-    const current = cameraRef.current;
-    const target = cameraTargetRef.current;
-    const nextZ = getCameraZoom(target.z * factor);
-    const worldPoint = screenToWorld(point, current);
-    zoomAnchorRef.current = { screen: point, world: worldPoint };
-    const nextX = point[0] / nextZ - worldPoint[0];
-    const nextY = point[1] / nextZ - worldPoint[1];
-    applyCameraTarget({ x: nextX, y: nextY, z: nextZ });
+    applyZoomFactor(point, direction === "in" ? 1.12 : 1 / 1.12);
   };
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import React from "react";
 import { useLocation, Form } from "react-router-dom";
 import useModal from "../hooks/useModal";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { usePeerStore } from "../hooks/usePeerConnection";
 import { useShapeStore } from "../hooks/useShapeStore";
 import { Datum } from "../hooks/useCards";
@@ -350,11 +351,7 @@ export function SelectionPanel({
   const connectToPeer = usePeerStore((state) => state.connectToPeer);
   const peer = usePeerStore((state) => state.peer);
   const [copied, setCopied] = React.useState(false);
-  const [isMobile, setIsMobile] = React.useState(() =>
-    typeof window === "undefined"
-      ? false
-      : window.matchMedia("(max-width: 720px)").matches
-  );
+  const isMobile = useIsMobile();
 
   // Modal state
   const [modal, showModal] = useModal();
@@ -379,16 +376,6 @@ export function SelectionPanel({
     });
     return Array.from(map.values());
   })();
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const media = window.matchMedia("(max-width: 720px)");
-    const handleChange = (event: MediaQueryListEvent) => {
-      setIsMobile(event.matches);
-    };
-    media.addEventListener("change", handleChange);
-    return () => media.removeEventListener("change", handleChange);
-  }, []);
 
 
   const deckCount = deck?.length ?? 0;
