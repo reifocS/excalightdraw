@@ -130,4 +130,56 @@ describe("stateSnapshot", () => {
       })
     ).toBeNull();
   });
+
+  it("rejects unsafe ids and image sources in imported snapshots", () => {
+    const base = {
+      kind: "maginet/debug-snapshot",
+      version: 1,
+      capturedAt: 1,
+      deckParam: "",
+      cardState: { cards: [], deck: [] },
+      shapes: [],
+      selectedShapeIds: [],
+      editingText: null,
+      camera: { x: 0, y: 0, z: 1 },
+      mode: "select",
+      shapeType: "text",
+      isSnapEnabled: false,
+      showCounterControls: false,
+      selectedHandCardId: null,
+      connectedPeerIds: [],
+      meta: {},
+    };
+
+    expect(
+      normalizeDebugSnapshot({
+        ...base,
+        connectedPeerIds: ["__proto__", "peer-1"],
+      })?.connectedPeerIds
+    ).toEqual(["peer-1"]);
+    expect(
+      normalizeDebugSnapshot({
+        ...base,
+        cardState: {
+          cards: [{ id: "hand-1", src: ["javascript:alert(1)"] }],
+          deck: [],
+        },
+      })
+    ).toBeNull();
+    expect(
+      normalizeDebugSnapshot({
+        ...base,
+        cardState: { cards: [{ id: "__proto__", src: [] }], deck: [] },
+      })
+    ).toBeNull();
+    expect(
+      normalizeDebugSnapshot({
+        ...base,
+        cardState: {
+          cards: Array.from({ length: 5_000 }, (_, i) => ({ id: `c-${i}`, src: [] })),
+          deck: [],
+        },
+      })
+    ).toBeNull();
+  });
 });

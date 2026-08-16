@@ -811,6 +811,7 @@ function Canvas() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!import.meta.env.DEV) return;
 
     const debugApi: DebugSnapshotApi = {
       exportSnapshot: () => debugSnapshotHandlersRef.current.exportSnapshot(),
