@@ -2,29 +2,13 @@ import React from "react";
 import toast from "react-hot-toast";
 import { Textarea } from "../../components/ui/Input";
 import { DebugSnapshotImportResult } from "../../debug/stateSnapshot";
+import { copyTextToClipboard } from "../../utils/clipboard";
 
 type SnapshotModalProps = {
   getCurrentSnapshotText: () => string;
   onClose: () => void;
   onLoadSnapshot: (raw: string) => DebugSnapshotImportResult;
 };
-
-async function copyTextToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const fallback = document.createElement("textarea");
-  fallback.value = text;
-  fallback.setAttribute("readonly", "true");
-  fallback.style.position = "fixed";
-  fallback.style.left = "-9999px";
-  document.body.appendChild(fallback);
-  fallback.select();
-  document.execCommand("copy");
-  document.body.removeChild(fallback);
-}
 
 export default function SnapshotModal({
   getCurrentSnapshotText,
@@ -46,7 +30,8 @@ export default function SnapshotModal({
     try {
       await copyTextToClipboard(nextText);
       toast.success("Snapshot copied");
-    } catch {
+    } catch (error) {
+      console.error("Failed to copy the snapshot", error);
       toast.error("Could not copy the snapshot");
     }
   };

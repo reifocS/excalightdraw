@@ -42,7 +42,8 @@ const getOrCreateLocalSessionId = () => {
       window.sessionStorage.setItem(LOCAL_GAME_STATE_SESSION_KEY, sessionId);
     }
     return sessionId;
-  } catch {
+  } catch (error) {
+    console.warn("Could not read or create the local session id", error);
     return null;
   }
 };
@@ -103,7 +104,8 @@ const parsePersistedLocalGameState = (
         ? value.connectedPeerIds.filter((id): id is string => typeof id === "string")
         : [],
     };
-  } catch {
+  } catch (error) {
+    console.warn("Could not parse the saved local table state", error);
     return null;
   }
 };
@@ -140,6 +142,7 @@ export function useGamePersistence({
   const localSessionInstanceIdRef = useRef(createLocalSessionId());
   const reconnectPeerIdsRef = useRef<string[]>([]);
   const attemptedReconnectRef = useRef(false);
+  const hasReportedPersistenceFailureRef = useRef(false);
 
   // Build a session-scoped persistence key and resolve duplicated-tab collisions.
   useEffect(() => {
@@ -166,8 +169,9 @@ export function useGamePersistence({
       const nextSessionId = createLocalSessionId();
       try {
         window.sessionStorage.setItem(LOCAL_GAME_STATE_SESSION_KEY, nextSessionId);
-      } catch {
+      } catch (error) {
         // If sessionStorage is unavailable we keep the shared fallback key.
+        console.warn("Could not rotate the local session id", error);
         return null;
       }
       return nextSessionId;
@@ -236,7 +240,14 @@ export function useGamePersistence({
       return;
     }
 
-    const raw = window.localStorage.getItem(localStateStorageKey);
+    let raw: string | null = null;
+    try {
+      raw = window.localStorage.getItem(localStateStorageKey);
+    } catch (error) {
+      console.warn("Could not read the saved local table state", error);
+      setSessionHydrationStatus("none");
+      return;
+    }
     if (!raw) {
       setSessionHydrationStatus("none");
       return;
@@ -316,8 +327,18 @@ export function useGamePersistence({
 
     try {
       window.localStorage.setItem(localStateStorageKey, JSON.stringify(snapshot));
-    } catch {
-      // Ignore persistence failures (private mode, quota, etc.).
+      hasReportedPersistenceFailureRef.current = false;
+    } catch (error) {
+      // Persistence can fail in private mode or when the quota is exceeded.
+      // Warn once so players know a refresh will not recover this table.
+      console.warn("Could not save the local table state", error);
+      if (!hasReportedPersistenceFailureRef.current) {
+        hasReportedPersistenceFailureRef.current = true;
+        toast.error(
+          "Could not save this table locally, so a refresh will not recover it.",
+          { id: "local-state-save-failed" }
+        );
+      }
     }
   }, [
     cardState,

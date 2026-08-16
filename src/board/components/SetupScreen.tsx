@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import { processRawText } from "../../hooks/useCards";
+import { copyTextToClipboard } from "../../utils/clipboard";
 import { DEFAULT_DECK } from "../../data/defaultDeck";
 import type Peer from "peerjs";
 import type { DataConnection } from "peerjs";
@@ -62,15 +64,24 @@ export default function SetupScreen({
     setSetupError(null);
   };
 
-  const handleCopyPeerId = () => {
+  const handleCopyPeerId = async () => {
     if (!peer?.id) return;
-    navigator.clipboard.writeText(peer.id);
+    try {
+      await copyTextToClipboard(peer.id);
+    } catch (error) {
+      console.error("Failed to copy the peer ID", error);
+      toast.error("Could not copy your peer ID. Copy it manually instead.");
+      return;
+    }
     setSetupCopied(true);
     window.setTimeout(() => setSetupCopied(false), 2000);
   };
 
   const deckCardCount = deckNames.length;
-  const deckStatus = deckError
+  const deckErrorMessage = deckError
+    ? `Deck failed to load. ${deckError.message}`
+    : null;
+  const deckStatus = deckErrorMessage
     ? "Deck failed to load. Check card names."
     : deckCardCount > 0
       ? isDeckLoading
@@ -151,9 +162,9 @@ export default function SetupScreen({
               <span>Deck status</span>
               <span>{deckStatus}</span>
             </div>
-            {deckError && (
+            {deckErrorMessage && (
               <div className="setup-error text-xs text-win-danger">
-                Deck failed to load. Check card names.
+                {deckErrorMessage}
               </div>
             )}
             <div className="setup-grid grid grid-cols-[repeat(2,minmax(0,1fr))] max-[720px]:grid-cols-1 gap-3">
@@ -199,7 +210,9 @@ export default function SetupScreen({
                   <Button
                     type="button"
                     className="setup-button ghost rounded px-3.5 py-2 text-xs bg-win-header-bg max-[720px]:w-full"
-                    onClick={handleCopyPeerId}
+                    onClick={() => {
+                  void handleCopyPeerId();
+                }}
                     disabled={!peer?.id}
                   >
                     {setupCopied ? "Copied" : "Copy"}

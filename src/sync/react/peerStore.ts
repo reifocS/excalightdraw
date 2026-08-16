@@ -218,15 +218,25 @@ export const usePeerStore = create<PeerState>((_, get) => ({
 
   connectToPeer: (peerId: string) => {
     const targetPeerId = peerId.trim();
-    if (!isValidPeerId(targetPeerId)) return;
+    if (!isValidPeerId(targetPeerId)) {
+      setPeerError(new Error("That peer ID is not valid."));
+      return;
+    }
 
     const { peer } = get();
-    if (peer?.id === targetPeerId) return;
+    if (peer?.id === targetPeerId) {
+      setPeerError(new Error("That peer ID is your own."));
+      return;
+    }
     connectionLifecycle?.request(targetPeerId);
   },
 
   sendMessage: (message: Message, peerId?: string) => {
-    syncClient.send(message, peerId);
+    try {
+      syncClient.send(message, peerId);
+    } catch (error) {
+      setPeerError(toError(error));
+    }
   },
 
   disconnect: (peerId?: string) => {

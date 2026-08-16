@@ -90,7 +90,10 @@ function ShapeFactory({
         />
       );
     default:
-      throw new Error(`Unknown shape type: ${shape.type}`);
+      // Remote peers and imported snapshots can carry shape types this build
+      // cannot render; skip them instead of breaking the whole board.
+      console.warn(`Unknown shape type: ${shape.type}`);
+      return null;
   }
 }
 
